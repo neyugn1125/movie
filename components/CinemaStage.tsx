@@ -596,26 +596,9 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white mb-2">
             Màn Chiếu Đang Chờ Phim
           </h2>
-          <p className="text-xs sm:text-sm text-slate-400 mb-6 leading-relaxed">
+          <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
             Bạn hoặc {partnerName} có thể bấm nút &quot;Chiếu Phim&quot; ở thanh điều khiển bên dưới để bắt đầu chia sẻ phim.
           </p>
-
-          <div className="p-3 sm:p-4 rounded-xl bg-white/5 border border-white/10 text-left text-[11px] sm:text-xs text-slate-300 space-y-2">
-            <div className="flex items-center gap-1.5 font-semibold text-theme-accent">
-              <Info className="w-3.5 h-3.5" /> Mẹo xem phim mượt mà và âm thanh chuẩn:
-            </div>
-            <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
-              <li>
-                Khuyến khích dùng máy tính phát qua Chrome / Edge và chọn <strong>Chia sẻ thẻ (Share Tab)</strong> để lấy âm thanh gốc chuẩn Stereo.
-              </li>
-              <li>
-                Điện thoại iPhone Safari có thể vào rạp xem mượt mà với chuẩn nén hình ảnh H.264 tối ưu pin.
-              </li>
-              <li>
-                Nếu xem trên Netflix/Apple TV bị đen màn hình, hãy tắt tính năng &quot;Hardware Acceleration&quot; trong cài đặt trình duyệt.
-              </li>
-            </ul>
-          </div>
         </div>
       )}
     </div>

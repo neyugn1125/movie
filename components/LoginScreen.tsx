@@ -39,7 +39,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       {/* Main Glassmorphic Card */}
       <div
-        className={`relative z-10 w-full max-w-md p-8 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-2xl shadow-2xl transition-all duration-300 ${
+        className={`relative z-10 w-full max-w-md p-6 sm:p-8 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-2xl shadow-2xl transition-all duration-300 ${
           isShaking ? "animate-[shake_0.5s_ease-in-out]" : ""
         }`}
       >
@@ -74,7 +74,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   if (errorMsg) setErrorMsg("");
                 }}
                 placeholder="Nhập mật khẩu của bạn..."
-                className="w-full pl-10 pr-11 py-3 bg-white/[0.05] border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400/50 focus:border-transparent transition-all"
+                className="w-full pl-10 pr-11 py-3 bg-white/[0.05] border border-white/10 rounded-xl text-white placeholder-slate-500 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-sky-400/50 focus:border-transparent transition-all"
                 autoFocus
               />
               <button

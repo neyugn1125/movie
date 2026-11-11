@@ -13,8 +13,8 @@ export const ReactionOverlay: React.FC<ReactionOverlayProps> = ({ reactions }) =
       {reactions.map((r) => (
         <div
           key={r.id}
-          style={{ left: `${r.xPercent}%`, bottom: "100px" }}
-          className="absolute animate-float-up text-4xl select-none filter drop-shadow-lg"
+          style={{ left: `${r.xPercent}%`, bottom: "80px" }}
+          className="absolute animate-float-up text-3xl sm:text-4xl select-none filter drop-shadow-lg"
         >
           {r.emoji}
         </div>

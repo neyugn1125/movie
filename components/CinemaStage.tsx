@@ -54,13 +54,22 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
     }
   }, [activeStream]);
 
-  // Fullscreen toggle
+  // Fullscreen toggle (Supports desktop and iOS Safari)
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    if (containerRef.current.requestFullscreen) {
+      if (!document.fullscreenElement) {
+        containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+      } else {
+        document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      }
+    } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
+      // iOS Safari fallback on iPhone
+      try {
+        (videoRef.current as any).webkitEnterFullscreen();
+      } catch (err) {
+        console.warn("iOS fullscreen failed:", err);
+      }
     }
   };
 
@@ -118,32 +127,32 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
           />
 
           {/* Current Stream Label Badge */}
-          <div className="absolute top-6 left-6 z-20 flex items-center gap-2">
-            <div className="px-3 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[11px] text-white flex items-center gap-2 shadow-lg">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>
+          <div className="absolute top-3 sm:top-6 left-3 sm:left-6 z-20 flex items-center gap-2">
+            <div className="px-2.5 sm:px-3 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] sm:text-[11px] text-white flex items-center gap-1.5 sm:gap-2 shadow-lg">
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+              <span className="truncate max-w-[170px] sm:max-w-none">
                 {isPartnerSharing
-                  ? `Màn hình rạp phim của ${partnerName}`
-                  : "Màn hình của bạn đang phát trực tiếp"}
+                  ? `Màn hình của ${partnerName}`
+                  : "Màn hình của bạn đang phát"}
               </span>
             </div>
           </div>
 
           {/* Stats Overlay */}
           {showStats && stats && (
-            <div className="absolute top-6 right-6 z-20 bg-black/75 backdrop-blur-md border border-white/10 rounded-xl p-2.5 text-[11px] font-mono text-slate-300 shadow-xl flex flex-col gap-1 min-w-[190px]">
-              <div className="flex items-center justify-between border-b border-white/10 pb-1 text-white font-semibold">
-                <span className="flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-theme-accent" /> WebRTC Stats
+            <div className="absolute top-3 sm:top-6 right-3 sm:right-6 z-20 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl p-2 sm:p-2.5 text-[9px] sm:text-[11px] font-mono text-slate-300 shadow-xl flex flex-col gap-0.5 sm:gap-1 min-w-[140px] sm:min-w-[190px]">
+              <div className="flex items-center justify-between border-b border-white/10 pb-0.5 sm:pb-1 text-white font-semibold">
+                <span className="flex items-center gap-1 sm:gap-1.5">
+                  <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-theme-accent" /> Stats
                 </span>
-                <span className="text-[10px] text-emerald-400">{stats.codec}</span>
+                <span className="text-[9px] sm:text-[10px] text-emerald-400">{stats.codec}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Độ phân giải:</span>
                 <span className="text-white font-medium">{stats.resolution}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Tốc độ khung hình:</span>
+                <span className="text-slate-400">Khung hình:</span>
                 <span className="text-white font-medium">{stats.fps} fps</span>
               </div>
               <div className="flex justify-between">
@@ -151,7 +160,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
                 <span className="text-theme-accent font-medium">{stats.bitrateMbps} Mbps</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Độ trễ (Ping):</span>
+                <span className="text-slate-400">Độ trễ:</span>
                 <span
                   className={
                     stats.pingMs < 50
@@ -167,8 +176,8 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </div>
           )}
 
-          {/* Quick On-Screen Video Toolbar (Hover) */}
-          <div className="absolute bottom-6 right-6 z-20 flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl p-1.5 opacity-40 hover:opacity-100 transition-opacity">
+          {/* Quick On-Screen Video Toolbar */}
+          <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1 sm:gap-2 bg-black/70 backdrop-blur-md border border-white/10 rounded-xl p-1 sm:p-1.5 opacity-70 hover:opacity-100 transition-opacity">
             <button
               onClick={() => setShowStats(!showStats)}
               title="Bật/Tắt bảng thông số Realtime Stats"

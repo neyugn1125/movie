@@ -9,7 +9,6 @@ export const getIceServers = (): RTCIceServer[] => {
     { urls: "stun:global.stun.twilio.com:3478" },
   ];
 
-  // Optional custom TURN servers via environment variables (e.g. Metered or Cloudflare Calls)
   if (process.env.NEXT_PUBLIC_TURN_URL) {
     servers.push({
       urls: process.env.NEXT_PUBLIC_TURN_URL,
@@ -21,10 +20,6 @@ export const getIceServers = (): RTCIceServer[] => {
   return servers;
 };
 
-/**
- * Generate unique, deterministic Peer ID scoped to the deployed domain
- * to prevent collisions with other PeerJS users across the globe.
- */
 export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
   let domainPrefix = "cinema-room";
   if (typeof window !== "undefined") {
@@ -37,7 +32,99 @@ export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
 };
 
 /**
- * Configure RTCRtpSender to optimize bitrate and degradation preference
+ * Injects Google-specific high-bandwidth parameters and b=AS/b=TIAS lines
+ * into SDP to bypass Chrome's default 1.5 - 2 Mbps bandwidth cap.
+ */
+export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string => {
+  const targetKbps = bitrateMbps * 1000;
+  const targetBps = bitrateMbps * 1_000_000;
+  const minKbps = Math.min(8000, Math.floor(targetKbps * 0.6));
+  const startKbps = targetKbps;
+  const maxKbps = Math.max(25000, targetKbps);
+
+  const lines = sdp.split("\r\n");
+  const result: string[] = [];
+  let inVideoSection = false;
+  let hasBandwidthLine = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+
+    if (line.startsWith("m=video")) {
+      inVideoSection = true;
+      hasBandwidthLine = false;
+      result.push(line);
+      continue;
+    } else if (inVideoSection && line.startsWith("m=")) {
+      inVideoSection = false;
+    }
+
+    // Inject bandwidth lines under m=video before attributes
+    if (inVideoSection && !hasBandwidthLine && (line.startsWith("c=") || line.startsWith("a="))) {
+      result.push(`b=AS:${targetKbps}`);
+      result.push(`b=TIAS:${targetBps}`);
+      hasBandwidthLine = true;
+    }
+
+    // Enhance fmtp lines for video codecs (VP9, H264, VP8) with Chrome BWE parameters
+    if (inVideoSection && line.startsWith("a=fmtp:")) {
+      const googleBitrateParams = `;x-google-min-bitrate=${minKbps};x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
+      if (!line.includes("x-google-min-bitrate")) {
+        line += googleBitrateParams;
+      }
+    }
+
+    result.push(line);
+  }
+
+  return result.join("\r\n");
+};
+
+/**
+ * Patches RTCPeerConnection to enforce high-bitrate SDP negotiation on both Offer and Answer
+ */
+export const patchPeerConnectionForBitrate = (
+  pc: RTCPeerConnection,
+  targetBitrateMbps: number = 15
+) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyPc = pc as any;
+  if (anyPc._bitratePatched) return;
+  anyPc._bitratePatched = true;
+
+  try {
+    const origCreateOffer = pc.createOffer.bind(pc);
+    pc.createOffer = async function (options?: RTCOfferOptions) {
+      const offer = await origCreateOffer(options);
+      if (offer && offer.sdp) {
+        offer.sdp = enhanceSdpBitrate(offer.sdp, targetBitrateMbps);
+      }
+      return offer;
+    };
+
+    const origCreateAnswer = pc.createAnswer.bind(pc);
+    pc.createAnswer = async function (options?: RTCAnswerOptions) {
+      const answer = await origCreateAnswer(options);
+      if (answer && answer.sdp) {
+        answer.sdp = enhanceSdpBitrate(answer.sdp, targetBitrateMbps);
+      }
+      return answer;
+    };
+
+    const origSetLocalDescription = pc.setLocalDescription.bind(pc);
+    pc.setLocalDescription = async function (description?: RTCSessionDescriptionInit) {
+      if (description && description.sdp) {
+        description.sdp = enhanceSdpBitrate(description.sdp, targetBitrateMbps);
+      }
+      return origSetLocalDescription(description);
+    };
+  } catch (err) {
+    console.warn("Could not patch RTCPeerConnection for SDP bitrate:", err);
+  }
+};
+
+/**
+ * Configure RTCRtpSender to unlock 15-25 Mbps bitrate and maintain 60fps
  */
 export const configureVideoSender = async (
   sender: RTCRtpSender,
@@ -51,8 +138,14 @@ export const configureVideoSender = async (
     }
 
     const maxBitrateBps = bitrateMbps * 1_000_000;
+    const minBitrateBps = Math.min(8_000_000, Math.floor(maxBitrateBps * 0.6)); // Force high floor
+
     parameters.encodings[0].maxBitrate = maxBitrateBps;
-    (parameters as any).degradationPreference = degradation;
+    (parameters.encodings[0] as any).minBitrate = minBitrateBps;
+    (parameters.encodings[0] as any).maxFramerate = 60;
+    (parameters.encodings[0] as any).scaleResolutionDownBy = 1.0; // Never downscale
+    (parameters.encodings[0] as any).networkPriority = "high";
+    (parameters as any).degradationPreference = degradation; // Solid 60fps
 
     await sender.setParameters(parameters);
   } catch (err) {

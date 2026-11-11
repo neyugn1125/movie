@@ -16,6 +16,7 @@ import {
   getPeerIdForRole,
   configureVideoSender,
   prioritizeVideoCodecs,
+  patchPeerConnectionForBitrate,
 } from "@/utils/webrtcConfig";
 
 interface UseCinemaWebRTCProps {
@@ -150,6 +151,10 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           });
           screenCallRef.current = call;
           activePeerConnectionRef.current = call.peerConnection;
+
+          if (call.peerConnection) {
+            patchPeerConnectionForBitrate(call.peerConnection, 25);
+          }
         }
 
         // If currently speaking on mic, send voice call to partner
@@ -263,6 +268,11 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           if (metadata.type === "screen") {
             screenCallRef.current = call;
             activePeerConnectionRef.current = call.peerConnection;
+
+            // Patch incoming peer connection for high-bitrate SDP Answer
+            if (call.peerConnection) {
+              patchPeerConnectionForBitrate(call.peerConnection, 25);
+            }
 
             call.answer(); // Answer receive-only
 
@@ -448,9 +458,9 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const displayMediaOptions: any = {
           video: {
-            width: { ideal: 2560, max: 3840 },
-            height: { ideal: 1440, max: 2160 },
-            frameRate: { ideal: 60, max: 60 },
+            width: { ideal: 2560, min: 1920, max: 3840 },
+            height: { ideal: 1440, min: 1080, max: 2160 },
+            frameRate: { ideal: 60, min: 45, max: 60 },
             cursor: "motion",
           },
           audio: {
@@ -485,6 +495,11 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           screenCallRef.current = call;
           activePeerConnectionRef.current = call.peerConnection;
 
+          // Force high-bitrate SDP negotiation immediately on the peer connection
+          if (call.peerConnection) {
+            patchPeerConnectionForBitrate(call.peerConnection, targetBitrate);
+          }
+
           const applyOptimizations = async () => {
             const pc = call.peerConnection;
             if (pc) {
@@ -502,6 +517,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           applyOptimizations();
           setTimeout(applyOptimizations, 300);
           setTimeout(applyOptimizations, 1000);
+          setTimeout(applyOptimizations, 2500);
+          setTimeout(applyOptimizations, 5000);
 
           call.on("close", () => {
             stopScreenShare();

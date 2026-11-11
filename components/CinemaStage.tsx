@@ -54,22 +54,62 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
     }
   }, [activeStream]);
 
-  // Fullscreen toggle (Supports desktop and iOS Safari)
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    if (containerRef.current.requestFullscreen) {
-      if (!document.fullscreenElement) {
-        containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+  // Synchronize fullscreen state with browser/OS events
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isFull = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(isFull);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+    };
+  }, []);
+
+  // Fullscreen toggle (Handles desktop, mobile, container and video fallback)
+  const toggleFullscreen = async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = document as any;
+      const isFull = !!(
+        document.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+
+      if (!isFull) {
+        if (containerRef.current?.requestFullscreen) {
+          await containerRef.current.requestFullscreen();
+        } else if (doc.documentElement?.webkitRequestFullscreen) {
+          doc.documentElement.webkitRequestFullscreen();
+        } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
+          // iOS Safari on iPhone
+          (videoRef.current as any).webkitEnterFullscreen();
+        }
       } else {
-        document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        }
       }
-    } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
-      // iOS Safari fallback on iPhone
-      try {
-        (videoRef.current as any).webkitEnterFullscreen();
-      } catch (err) {
-        console.warn("iOS fullscreen failed:", err);
-      }
+    } catch (err) {
+      console.warn("Fullscreen toggle failed:", err);
     }
   };
 
@@ -93,15 +133,42 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
     else setFitMode("contain");
   };
 
+  // Keep mobile and laptop screen awake during movie playback
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let wakeLock: any = null;
+
+    const requestWakeLock = async () => {
+      if (typeof navigator !== "undefined" && "wakeLock" in navigator && activeStream) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          wakeLock = await (navigator as any).wakeLock.request("screen");
+        } catch (err) {
+          console.warn("Screen Wake Lock unavailable:", err);
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    return () => {
+      if (wakeLock) {
+        wakeLock.release().catch(() => {});
+      }
+    };
+  }, [activeStream]);
+
   return (
     <div
       ref={containerRef}
-      className={`relative flex-1 w-full flex items-center justify-center overflow-hidden transition-all duration-500 ${
-        ambientMode ? "bg-black" : "bg-slate-950/80"
+      className={`relative w-full flex items-center justify-center overflow-hidden transition-all duration-300 ${
+        isFullscreen
+          ? "fixed inset-0 z-50 w-screen h-screen bg-black p-0 m-0"
+          : `flex-1 ${ambientMode ? "bg-black" : "bg-slate-950/80"}`
       }`}
     >
-      {/* Ambilight Glow Behind Video */}
-      {activeStream && (
+      {/* Ambilight Glow Behind Video (Disabled in true fullscreen for pure cinema black) */}
+      {activeStream && !isFullscreen && (
         <div
           className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ${
             ambientMode ? "opacity-70 scale-105" : "opacity-30 scale-100"
@@ -111,19 +178,32 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
 
       {/* Main Video Element */}
       {activeStream ? (
-        <div className="relative w-full h-full max-h-[85vh] flex items-center justify-center p-2 sm:p-4">
+        <div
+          className={`relative w-full h-full flex items-center justify-center ${
+            isFullscreen
+              ? "p-0 m-0 max-h-none max-w-none bg-black"
+              : "p-2 sm:p-4 max-h-[85vh]"
+          }`}
+        >
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted={true} // Film audio is managed by Web Audio API for volume control & ducking
-            className={`w-full h-full rounded-2xl shadow-2xl transition-all duration-300 ${
+            onDoubleClick={toggleFullscreen}
+            className={`w-full h-full transition-all duration-200 select-none ${
+              isFullscreen
+                ? "rounded-none ring-0 border-0 shadow-none max-h-none max-w-none"
+                : `rounded-2xl shadow-2xl ${
+                    ambientMode ? "ring-1 ring-white/10 shadow-glow-lg" : "ring-1 ring-white/10"
+                  }`
+            } ${
               fitMode === "contain"
                 ? "object-contain"
                 : fitMode === "cover"
                 ? "object-cover"
                 : "object-fill"
-            } ${ambientMode ? "ring-1 ring-white/10 shadow-glow-lg" : "ring-1 ring-white/10"}`}
+            }`}
           />
 
           {/* Current Stream Label Badge */}
@@ -177,10 +257,10 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
           )}
 
           {/* Quick On-Screen Video Toolbar */}
-          <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1 sm:gap-2 bg-black/70 backdrop-blur-md border border-white/10 rounded-xl p-1 sm:p-1.5 opacity-70 hover:opacity-100 transition-opacity">
+          <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1 sm:gap-2 bg-black/75 backdrop-blur-md border border-white/10 rounded-xl p-1 sm:p-1.5 opacity-70 hover:opacity-100 transition-opacity">
             <button
               onClick={() => setShowStats(!showStats)}
-              title="Bật/Tắt bảng thông số Realtime Stats"
+              title="Bật/Tắt bảng thông số"
               className={`p-1.5 rounded-lg text-xs transition-colors ${
                 showStats ? "text-theme-accent bg-white/10" : "text-slate-400 hover:text-white"
               }`}
@@ -189,10 +269,17 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </button>
             <button
               onClick={cycleFitMode}
-              title={`Chế độ khung hình: ${fitMode.toUpperCase()}`}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 text-xs transition-colors"
+              title={`Tỉ lệ hiển thị: ${
+                fitMode === "contain"
+                  ? "Vừa vặn (Gốc)"
+                  : fitMode === "cover"
+                  ? "Tràn màn hình (Cover)"
+                  : "Kéo giãn (Fill)"
+              }`}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 text-xs transition-colors flex items-center gap-1"
             >
               <Tv className="w-4 h-4" />
+              <span className="text-[10px] uppercase font-mono hidden sm:inline">{fitMode}</span>
             </button>
             <button
               onClick={togglePiP}
@@ -203,8 +290,12 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </button>
             <button
               onClick={toggleFullscreen}
-              title={isFullscreen ? "Thu nhỏ" : "Toàn màn hình"}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 text-xs transition-colors"
+              title={isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình thực tế"}
+              className={`p-1.5 rounded-lg text-xs transition-colors ${
+                isFullscreen
+                  ? "bg-theme-primary text-white"
+                  : "text-slate-400 hover:text-white hover:bg-white/10"
+              }`}
             >
               {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>

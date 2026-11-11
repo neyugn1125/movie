@@ -8,6 +8,8 @@ export const getIceServers = (): RTCIceServer[] => {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
+    { urls: "stun:stun.services.mozilla.com:3478" },
+    { urls: "stun:global.stun.twilio.com:3478" },
   ];
 
   if (process.env.NEXT_PUBLIC_TURN_URL) {
@@ -35,7 +37,9 @@ export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
 export const isSafariIOS = (): boolean => {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
-  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isIOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isWebKit = /WebKit/i.test(ua) && !/CriOS|FxiOS|OPiOS|mercury/i.test(ua);
   return isIOS || isWebKit;
 };
@@ -43,11 +47,21 @@ export const isSafariIOS = (): boolean => {
 /**
  * Injects Google-specific high-bandwidth parameters and b=AS/b=TIAS lines
  * into SDP in strict RFC 4566 compliance:
- * In media section m=video, b= lines MUST be placed AFTER c= line (if present)
- * and BEFORE any a= attribute lines.
+ * - NEVER applied on Safari iOS (which causes WebKit InvalidAccessError on parse)
+ * - ONLY applied on Offer descriptions (never modify Answer descriptions)
  */
 export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string => {
   if (!sdp) return sdp;
+
+  // On Safari iOS, keep SDP pristine to ensure WebKit hardware decoding passes
+  if (isSafariIOS()) {
+    return sdp;
+  }
+
+  // Do not alter Answer SDPs
+  if (sdp.includes("a=setup:active")) {
+    return sdp;
+  }
 
   const targetKbps = bitrateMbps * 1000;
   const targetBps = bitrateMbps * 1_000_000;
@@ -58,7 +72,6 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
   const result: string[] = [];
   let inVideoSection = false;
   let bandwidthInjected = false;
-  const isIOS = isSafariIOS();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -94,8 +107,7 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
         bandwidthInjected = true;
       }
 
-      // Only inject Chromium-proprietary bitrate params if not on iOS Safari (to prevent SDP parse error)
-      if (!isIOS && line.startsWith("a=fmtp:")) {
+      if (line.startsWith("a=fmtp:")) {
         let enhancedLine = line;
         if (!enhancedLine.includes("x-google-min-bitrate")) {
           enhancedLine += `;x-google-min-bitrate=2500;x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
@@ -114,11 +126,14 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
 /**
  * Patches RTCPeerConnection to safely enforce high-bitrate SDP negotiation
  * upon setLocalDescription without causing malformed SDP or repeated mutations.
+ * Protected: NEVER touches Safari iOS and NEVER touches Answer descriptions.
  */
 export const patchPeerConnectionForBitrate = (
   pc: RTCPeerConnection,
   targetBitrateMbps: number = 15
 ) => {
+  if (isSafariIOS()) return;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyPc = pc as any;
   if (anyPc._bitratePatched) return;
@@ -129,7 +144,7 @@ export const patchPeerConnectionForBitrate = (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (pc as any).setLocalDescription = async function (...args: any[]) {
       const desc = args[0];
-      if (desc && desc.sdp) {
+      if (desc && desc.sdp && desc.type === "offer") {
         desc.sdp = enhanceSdpBitrate(desc.sdp, targetBitrateMbps);
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,8 +189,12 @@ export const configureVideoSender = async (
 };
 
 /**
- * Prioritize H.264 first (100% hardware-supported on iOS 17 Safari, macOS, Windows, Android)
- * followed by VP9. This prevents codec negotiation failure on Safari iOS.
+ * Prioritize H.264 codecs that iOS Safari hardware-decodes natively:
+ * 1. H.264 packetization-mode=1 with profile-level-id=42e01f (Constrained Baseline) or 4d001f (Main)
+ * 2. Other H.264 with packetization-mode=1
+ * 3. VP9
+ * 4. Remaining codecs
+ * This guarantees seamless video handshake with iOS 17 Safari without stream drops.
  */
 export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
   if (!("setCodecPreferences" in transceiver)) return;
@@ -185,15 +204,26 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
     const capabilities = RTCRtpReceiver.getCapabilities("video");
     if (!capabilities || !capabilities.codecs) return;
 
-    const preferredCodecs = ["video/H264", "video/VP9"];
-    const sorted = [...capabilities.codecs].sort((a, b) => {
-      const aIndex = preferredCodecs.indexOf(a.mimeType);
-      const bIndex = preferredCodecs.indexOf(b.mimeType);
-      if (aIndex !== -1 && bIndex === -1) return -1;
-      if (aIndex === -1 && bIndex !== -1) return 1;
-      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-      return 0;
-    });
+    const getScore = (c: RTCRtpCodecCapability): number => {
+      if (c.mimeType.toLowerCase() === "video/h264") {
+        const fmtp = (c.sdpFmtpLine || "").toLowerCase();
+        // Safari iOS 17 prefers packetization-mode=1 and baseline/main profiles
+        const hasPacketization1 = fmtp.includes("packetization-mode=1");
+        const isBaselineOrMain =
+          fmtp.includes("profile-level-id=42e0") ||
+          fmtp.includes("profile-level-id=4200") ||
+          fmtp.includes("profile-level-id=4d00");
+
+        if (hasPacketization1 && isBaselineOrMain) return 100;
+        if (hasPacketization1) return 80;
+        return 60;
+      }
+      if (c.mimeType.toLowerCase() === "video/vp9") return 40;
+      if (c.mimeType.toLowerCase() === "video/vp8") return 20;
+      return 10;
+    };
+
+    const sorted = [...capabilities.codecs].sort((a, b) => getScore(b) - getScore(a));
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (transceiver as any).setCodecPreferences(sorted);

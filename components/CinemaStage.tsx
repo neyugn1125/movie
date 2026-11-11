@@ -11,6 +11,10 @@ import {
   Info,
   Tv,
   Play,
+  Volume2,
+  VolumeX,
+  Radio,
+  RefreshCw,
 } from "lucide-react";
 
 interface CinemaStageProps {
@@ -21,6 +25,7 @@ interface CinemaStageProps {
   ambientMode: boolean;
   stats: StreamStats | null;
   partnerName: string;
+  onRequestScreenStream?: () => void;
 }
 
 export const CinemaStage: React.FC<CinemaStageProps> = ({
@@ -31,6 +36,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
   ambientMode,
   stats,
   partnerName,
+  onRequestScreenStream,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,20 +45,40 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
   const [showStats, setShowStats] = useState(true);
   const [isPlayBlocked, setIsPlayBlocked] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const [isRequestingStream, setIsRequestingStream] = useState(false);
 
   // Active stream is either remote (if partner is sharing) or local (if I am sharing)
   const activeStream = remoteStream || (isSharingScreen ? localStream : null);
 
   const handleManualPlay = useCallback(() => {
     if (videoRef.current) {
+      videoRef.current.muted = false;
+      setIsVideoMuted(false);
       videoRef.current
         .play()
         .then(() => {
           setIsPlayBlocked(false);
         })
         .catch((err) => {
-          console.warn("Manual video play attempt error:", err);
+          console.warn("Manual unmuted video play attempt restricted by browser:", err);
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            setIsVideoMuted(true);
+            videoRef.current
+              .play()
+              .then(() => setIsPlayBlocked(false))
+              .catch(() => {});
+          }
         });
+    }
+  }, []);
+
+  const toggleVideoAudio = useCallback(() => {
+    if (videoRef.current) {
+      const nextMuted = !videoRef.current.muted;
+      videoRef.current.muted = nextMuted;
+      setIsVideoMuted(nextMuted);
     }
   }, []);
 
@@ -211,7 +237,9 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             ref={videoRef}
             autoPlay
             playsInline
-            muted={true}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            {...({ "webkit-playsinline": "true" } as any)}
+            muted={isVideoMuted}
             onClick={handleManualPlay}
             onDoubleClick={toggleFullscreen}
             className={`w-full h-full transition-all duration-200 select-none ${
@@ -299,6 +327,26 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
 
           {/* Floating On-Screen Quick Bar */}
           <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1.5 sm:gap-2 bg-black/60 backdrop-blur-md border border-white/10 p-1 sm:p-1.5 rounded-xl shadow-lg">
+            {/* Audio Toggle (Unmute button for iOS / Mobile) */}
+            <button
+              onClick={toggleVideoAudio}
+              title={isVideoMuted ? "Bật âm thanh phim" : "Tắt tiếng phim"}
+              className={`p-1.5 sm:p-2 rounded-lg text-xs transition-colors flex items-center gap-1 ${
+                isVideoMuted
+                  ? "text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-400/30"
+                  : "text-emerald-400 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              {isVideoMuted ? (
+                <>
+                  <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse" />
+                  <span className="hidden sm:inline text-[10px] font-medium">Bật tiếng</span>
+                </>
+              ) : (
+                <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              )}
+            </button>
+
             {/* Stats Toggle */}
             <button
               onClick={() => setShowStats(!showStats)}
@@ -348,6 +396,57 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
               )}
             </button>
           </div>
+        </div>
+      ) : isPartnerSharing ? (
+        /* Active Screen Sharing Available - Prompt Mobile to Connect */
+        <div className="flex flex-col items-center justify-center p-6 text-center max-w-md animate-fade-in">
+          <div className="relative mb-6">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-theme-primary/20 border border-theme-primary/40 flex items-center justify-center text-theme-primary shadow-glow animate-pulse">
+              <Radio className="w-10 h-10 sm:w-12 sm:h-12" />
+            </div>
+            <span className="absolute -top-1 -right-1 flex h-4 w-4">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500"></span>
+            </span>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold uppercase tracking-wider mb-3">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+            {partnerName} đang phát màn chiếu
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white mb-2">
+            Đang kết nối luồng phim...
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-300 mb-6 leading-relaxed">
+            Đối phương đang chia sẻ phim. Chạm vào nút bên dưới để tải luồng hình ảnh về máy bạn ngay lập tức.
+          </p>
+
+          <button
+            onClick={() => {
+              setIsRequestingStream(true);
+              onRequestScreenStream?.();
+              setTimeout(() => setIsRequestingStream(false), 2000);
+            }}
+            disabled={isRequestingStream}
+            className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-theme-primary to-theme-accent text-white font-bold text-sm sm:text-base shadow-glow hover:brightness-110 active:scale-95 transition-all flex items-center gap-2.5"
+          >
+            {isRequestingStream ? (
+              <>
+                <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+                <span>Đang lấy luồng video...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />
+                <span>Chạm để kết nối xem phim</span>
+              </>
+            )}
+          </button>
+
+          <p className="text-[11px] text-slate-400 mt-4">
+            Tự động đồng bộ và kết nối trực tiếp qua 4G/WiFi trong vài giây
+          </p>
         </div>
       ) : (
         /* Empty / Waiting Stage */

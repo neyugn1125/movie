@@ -4,6 +4,7 @@ import { ChatMessage, FloatingReaction } from "@/types/cinema";
 interface RoleSignal {
   peerId: string;
   isSharing: boolean;
+  requestScreen?: boolean;
   lastSeen: number;
 }
 
@@ -15,7 +16,7 @@ const roomReactions: FloatingReaction[] = [];
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { role, peerId, isSharing, newMessage, newReaction } = body;
+    const { role, peerId, isSharing, requestScreen, newMessage, newReaction } = body;
 
     if (!role || (role !== "nguyen" && role !== "crabie")) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
       roomSignals[role] = {
         peerId,
         isSharing: !!isSharing,
+        requestScreen: !!requestScreen,
         lastSeen: Date.now(),
       };
     }
@@ -65,6 +67,7 @@ export async function POST(req: NextRequest) {
         peerId: isPartnerOnline && partner ? partner.peerId : null,
         isOnline: isPartnerOnline,
         isSharing: isPartnerOnline && partner ? partner.isSharing : false,
+        requestScreen: isPartnerOnline && partner ? !!partner.requestScreen : false,
       },
       messages: roomMessages,
       recentReactions: roomReactions.filter((r) => Date.now() - Number(r.id.split("-")[0] || 0) < 6000),
@@ -93,6 +96,7 @@ export async function GET(req: NextRequest) {
       peerId: isPartnerOnline && partner ? partner.peerId : null,
       isOnline: isPartnerOnline,
       isSharing: isPartnerOnline && partner ? partner.isSharing : false,
+      requestScreen: isPartnerOnline && partner ? !!partner.requestScreen : false,
     },
     messages: roomMessages,
   });

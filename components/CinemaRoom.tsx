@@ -43,6 +43,7 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
     sendReaction,
     stats,
     reconnect,
+    requestScreenStream,
   } = useCinemaWebRTC({ myRole });
 
   // Web Audio & Ducking Hook
@@ -180,6 +181,7 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
           ambientMode={ambientMode}
           stats={stats}
           partnerName={partnerName}
+          onRequestScreenStream={requestScreenStream}
         />
       </main>
 

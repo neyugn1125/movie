@@ -1,26 +1,43 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { UserRole } from "@/types/cinema";
-import { Film, Moon, Sun, LogOut, Radio } from "lucide-react";
+import { Film, Moon, Sun, LogOut, Radio, RefreshCw } from "lucide-react";
 
 interface HeaderProps {
   myRole: UserRole;
   isPartnerConnected: boolean;
+  connectionStatusText?: string;
   ambientMode: boolean;
   onToggleAmbient: () => void;
   onLogout: () => void;
+  onReconnect?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   myRole,
   isPartnerConnected,
+  connectionStatusText,
   ambientMode,
   onToggleAmbient,
   onLogout,
+  onReconnect,
 }) => {
   const myName = myRole === "nguyen" ? "Nguyen" : "Crabie";
   const partnerName = myRole === "nguyen" ? "Crabie" : "Nguyen";
+  const [isSpinning, setIsSpinning] = useState(false);
+
+  const handleReconnect = () => {
+    if (onReconnect) {
+      setIsSpinning(true);
+      onReconnect();
+      setTimeout(() => setIsSpinning(false), 1500);
+    }
+  };
+
+  const displayText =
+    connectionStatusText ||
+    (isPartnerConnected ? `Đã kết nối với ${partnerName}` : `Đang chờ ${partnerName}...`);
 
   return (
     <header
@@ -36,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
           <Film className="w-4 h-4 sm:w-5 sm:h-5" />
         </div>
         <div>
-          <h1 className="text-sm sm:text-lg font-bold tracking-tight text-white flex items-center gap-2 truncate max-w-[150px] sm:max-w-none">
+          <h1 className="text-sm sm:text-lg font-bold tracking-tight text-white flex items-center gap-2 truncate max-w-[130px] sm:max-w-none">
             Nguyen and Crabie Cinema
           </h1>
           <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-slate-400">
@@ -48,24 +65,29 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Center / Inline Status Badge: Visible on both Mobile & Desktop */}
-      <div className="flex items-center">
+      {/* Center / Inline Status Badge: Clickable to reconnect */}
+      <div className="flex items-center gap-1.5">
         <div
-          className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-medium border transition-all ${
+          onClick={handleReconnect}
+          role="button"
+          tabIndex={0}
+          title="Bấm để đồng bộ / kết nối lại ngay"
+          className={`cursor-pointer flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-medium border transition-all active:scale-95 ${
             isPartnerConnected
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-              : "bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse-slow"
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+              : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20 animate-pulse-slow"
           }`}
         >
           <Radio className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
-          <span className="hidden sm:inline">
-            {isPartnerConnected
-              ? `Đã kết nối với ${partnerName}`
-              : "Đang chờ đối phương vào rạp..."}
-          </span>
-          <span className="sm:hidden font-medium">
+          <span className="hidden sm:inline">{displayText}</span>
+          <span className="sm:hidden font-medium truncate max-w-[110px]">
             {isPartnerConnected ? partnerName : "Đang chờ..."}
           </span>
+          <RefreshCw
+            className={`w-3 h-3 text-slate-400 hover:text-white transition-transform ${
+              isSpinning ? "animate-spin text-theme-accent" : ""
+            }`}
+          />
         </div>
       </div>
 
@@ -88,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Logout */}
         <button
           onClick={onLogout}
-          title="Đổi tài khoản"
+          title="Đổi vai trò đăng nhập"
           className="p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-medium bg-white/5 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/30 text-slate-400 border border-white/10 flex items-center gap-1.5 transition-all"
         >
           <LogOut className="w-4 h-4" />

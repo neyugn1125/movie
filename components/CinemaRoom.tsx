@@ -26,6 +26,7 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
   // WebRTC Core Hook
   const {
     isPartnerConnected,
+    connectionStatusText,
     isSharingScreen,
     isPartnerSharing,
     localScreenStream,
@@ -162,9 +163,11 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
       <Header
         myRole={myRole}
         isPartnerConnected={isPartnerConnected}
+        connectionStatusText={connectionStatusText}
         ambientMode={ambientMode}
         onToggleAmbient={() => setAmbientMode(!ambientMode)}
         onLogout={onLogout}
+        onReconnect={reconnect}
       />
 
       {/* Main Center Cinema Stage */}

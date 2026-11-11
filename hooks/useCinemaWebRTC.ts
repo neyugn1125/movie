@@ -380,18 +380,22 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             screenCallRef.current = call;
             activePeerConnectionRef.current = call.peerConnection;
 
-            // Direct native RTCPeerConnection track event (essential fallback for iOS 17 Safari)
+            // Direct native RTCPeerConnection track event (essential fallback for iOS 17 Safari & Multi-track)
             const pc = call.peerConnection;
             if (pc && pc.addEventListener) {
+              const composedStream = new MediaStream();
               pc.addEventListener("track", (event: RTCTrackEvent) => {
                 console.log("[WebRTC] Native track event received:", event.track.kind, event.streams);
-                if (event.streams && event.streams[0]) {
-                  setRemoteScreenStream(event.streams[0]);
-                  setIsPartnerSharing(true);
-                } else if (event.track) {
-                  setRemoteScreenStream(new MediaStream([event.track]));
-                  setIsPartnerSharing(true);
-                }
+                composedStream.addTrack(event.track);
+
+                const tracksToUse =
+                  event.streams && event.streams[0]
+                    ? event.streams[0].getTracks()
+                    : composedStream.getTracks();
+
+                // Always instantiate a new MediaStream so React state detects update and re-binds video element
+                setRemoteScreenStream(new MediaStream(tracksToUse));
+                setIsPartnerSharing(true);
               });
             }
 
@@ -400,7 +404,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
             call.on("stream", (incomingStream: MediaStream) => {
               console.log("[WebRTC] PeerJS call.on('stream') received remote screen stream!");
-              setRemoteScreenStream(incomingStream);
+              setRemoteScreenStream(new MediaStream(incomingStream.getTracks()));
               setIsPartnerSharing(true);
             });
 

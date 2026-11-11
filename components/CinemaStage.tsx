@@ -82,23 +82,56 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
     }
   }, []);
 
+  const handleRefreshVideo = useCallback(() => {
+    if (videoRef.current && activeStream) {
+      videoRef.current.srcObject = null;
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = activeStream;
+          videoRef.current.play().then(() => setIsPlayBlocked(false)).catch(() => {});
+        }
+      }, 80);
+    }
+  }, [activeStream]);
+
   useEffect(() => {
-    if (videoRef.current) {
-      if (activeStream) {
-        videoRef.current.srcObject = activeStream;
-        videoRef.current
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (activeStream) {
+      video.srcObject = activeStream;
+
+      const triggerPlay = () => {
+        video
           .play()
           .then(() => {
             setIsPlayBlocked(false);
           })
           .catch((err) => {
-            console.warn("Video auto-play restricted by Safari/iOS (User gesture required):", err);
+            console.warn("Video auto-play restricted by browser (User gesture required):", err);
             setIsPlayBlocked(true);
           });
-      } else {
-        videoRef.current.srcObject = null;
-        setIsPlayBlocked(false);
-      }
+      };
+
+      triggerPlay();
+
+      // Listen for track unmuting (first RTP video frame arrival)
+      activeStream.getVideoTracks().forEach((track) => {
+        track.enabled = true;
+        track.onunmute = () => {
+          console.log("[CinemaStage] Video track unmuted, triggering play...");
+          triggerPlay();
+        };
+      });
+
+      activeStream.onaddtrack = () => {
+        console.log("[CinemaStage] Stream addtrack received, re-triggering play...");
+        video.srcObject = activeStream;
+        triggerPlay();
+      };
+    } else {
+      video.srcObject = null;
+      setIsPlayBlocked(false);
     }
   }, [activeStream]);
 
@@ -325,6 +358,12 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </div>
           )}
 
+          {/* DRM / Black Screen Tip Badge */}
+          <div className="absolute bottom-3 sm:bottom-6 left-3 sm:left-6 z-20 hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] text-slate-400">
+            <Info className="w-3 h-3 text-amber-400 flex-shrink-0" />
+            <span>Mẹo: Nếu chia sẻ YouTube/Netflix bị đen hình, hãy tắt Hardware Acceleration trong cài đặt trình duyệt hoặc chọn Chia sẻ Toàn màn hình.</span>
+          </div>
+
           {/* Floating On-Screen Quick Bar */}
           <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1.5 sm:gap-2 bg-black/60 backdrop-blur-md border border-white/10 p-1 sm:p-1.5 rounded-xl shadow-lg">
             {/* Audio Toggle (Unmute button for iOS / Mobile) */}
@@ -372,6 +411,15 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             >
               <Tv className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="hidden sm:inline capitalize text-[10px]">{fitMode}</span>
+            </button>
+
+            {/* Reload / Re-bind Video Frame */}
+            <button
+              onClick={handleRefreshVideo}
+              title="Làm mới khung hình nếu video bị đen hoặc đứng"
+              className="p-1.5 sm:p-2 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             {/* PiP Button (Desktop / Supported browsers) */}

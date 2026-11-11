@@ -45,10 +45,10 @@ export const isSafariIOS = (): boolean => {
 };
 
 /**
- * Injects Google-specific high-bandwidth parameters and b=AS/b=TIAS lines
- * into SDP in strict RFC 4566 compliance:
- * - NEVER applied on Safari iOS (which causes WebKit InvalidAccessError on parse)
+ * Injects clean b=AS/b=TIAS lines into SDP in strict RFC 4566 compliance:
+ * - NEVER applied on Safari iOS
  * - ONLY applied on Offer descriptions (never modify Answer descriptions)
+ * - DOES NOT mutate a=fmtp lines to avoid breaking H.264/VP9 decoder parsers
  */
 export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string => {
   if (!sdp) return sdp;
@@ -65,8 +65,6 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
 
   const targetKbps = bitrateMbps * 1000;
   const targetBps = bitrateMbps * 1_000_000;
-  const startKbps = targetKbps;
-  const maxKbps = Math.max(25000, targetKbps);
 
   const lines = sdp.split(/\r?\n/);
   const result: string[] = [];
@@ -105,15 +103,6 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
         result.push(`b=AS:${targetKbps}`);
         result.push(`b=TIAS:${targetBps}`);
         bandwidthInjected = true;
-      }
-
-      if (line.startsWith("a=fmtp:")) {
-        let enhancedLine = line;
-        if (!enhancedLine.includes("x-google-min-bitrate")) {
-          enhancedLine += `;x-google-min-bitrate=2500;x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
-        }
-        result.push(enhancedLine);
-        continue;
       }
     }
 
@@ -189,12 +178,10 @@ export const configureVideoSender = async (
 };
 
 /**
- * Prioritize H.264 codecs that iOS Safari hardware-decodes natively:
- * 1. H.264 packetization-mode=1 with profile-level-id=42e01f (Constrained Baseline) or 4d001f (Main)
- * 2. Other H.264 with packetization-mode=1
- * 3. VP9
- * 4. Remaining codecs
- * This guarantees seamless video handshake with iOS 17 Safari without stream drops.
+ * Naturally prioritizes modern, high-efficiency WebRTC codecs:
+ * 1. VP9 (Native hardware YouTube/Netflix codec)
+ * 2. H.264 (Universal Apple & PC hardware decode)
+ * 3. VP8
  */
 export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
   if (!("setCodecPreferences" in transceiver)) return;
@@ -204,27 +191,15 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
     const capabilities = RTCRtpReceiver.getCapabilities("video");
     if (!capabilities || !capabilities.codecs) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const getScore = (c: any): number => {
-      if (c.mimeType.toLowerCase() === "video/h264") {
-        const fmtp = (c.sdpFmtpLine || "").toLowerCase();
-        // Safari iOS 17 prefers packetization-mode=1 and baseline/main profiles
-        const hasPacketization1 = fmtp.includes("packetization-mode=1");
-        const isBaselineOrMain =
-          fmtp.includes("profile-level-id=42e0") ||
-          fmtp.includes("profile-level-id=4200") ||
-          fmtp.includes("profile-level-id=4d00");
-
-        if (hasPacketization1 && isBaselineOrMain) return 100;
-        if (hasPacketization1) return 80;
-        return 60;
-      }
-      if (c.mimeType.toLowerCase() === "video/vp9") return 40;
-      if (c.mimeType.toLowerCase() === "video/vp8") return 20;
-      return 10;
-    };
-
-    const sorted = [...capabilities.codecs].sort((a, b) => getScore(b) - getScore(a));
+    const preferredCodecs = ["video/VP9", "video/H264", "video/VP8"];
+    const sorted = [...capabilities.codecs].sort((a, b) => {
+      const aIndex = preferredCodecs.indexOf(a.mimeType);
+      const bIndex = preferredCodecs.indexOf(b.mimeType);
+      if (aIndex !== -1 && bIndex === -1) return -1;
+      if (aIndex === -1 && bIndex !== -1) return 1;
+      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+      return 0;
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (transceiver as any).setCodecPreferences(sorted);

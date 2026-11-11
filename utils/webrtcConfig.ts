@@ -8,23 +8,6 @@ export const getIceServers = (): RTCIceServer[] => {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
-    { urls: "stun:global.stun.twilio.com:3478" },
-    // Free Public TURN relay from OpenRelay for cellular (4G/5G) and strict NAT on iOS/Android
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
   ];
 
   if (process.env.NEXT_PUBLIC_TURN_URL) {
@@ -38,21 +21,12 @@ export const getIceServers = (): RTCIceServer[] => {
   return servers;
 };
 
+/**
+ * Universal, fixed Peer IDs for the cinema couple.
+ * Always predictable so desktop and mobile 4G always find each other directly.
+ */
 export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
-  let domainPrefix = "cinema-room";
-  if (typeof window !== "undefined") {
-    const hostname = window.location.hostname;
-    if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
-      domainPrefix = hostname.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
-    }
-  }
-  return `${domainPrefix}-${role}`;
-};
-
-export const getRandomSessionPeerId = (role: "nguyen" | "crabie") => {
-  const base = getPeerIdForRole(role);
-  const randomSuffix = Math.random().toString(36).substring(2, 7);
-  return `${base}-${randomSuffix}`;
+  return `nguyen-crabie-cinema-${role}`;
 };
 
 /**
@@ -77,7 +51,6 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
 
   const targetKbps = bitrateMbps * 1000;
   const targetBps = bitrateMbps * 1_000_000;
-  const minKbps = Math.min(8000, Math.floor(targetKbps * 0.6));
   const startKbps = targetKbps;
   const maxKbps = Math.max(25000, targetKbps);
 
@@ -100,7 +73,6 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
     }
 
     if (inVideoSection) {
-      // Remove any pre-existing bandwidth lines to prevent duplicates
       if (line.startsWith("b=AS:") || line.startsWith("b=TIAS:")) {
         continue;
       }
@@ -122,11 +94,11 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
         bandwidthInjected = true;
       }
 
-      // Only inject Chromium-proprietary bitrate params if not strictly on iOS Safari (to prevent SDP parse error)
+      // Only inject Chromium-proprietary bitrate params if not on iOS Safari (to prevent SDP parse error)
       if (!isIOS && line.startsWith("a=fmtp:")) {
         let enhancedLine = line;
         if (!enhancedLine.includes("x-google-min-bitrate")) {
-          enhancedLine += `;x-google-min-bitrate=${minKbps};x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
+          enhancedLine += `;x-google-min-bitrate=2500;x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
         }
         result.push(enhancedLine);
         continue;
@@ -170,6 +142,7 @@ export const patchPeerConnectionForBitrate = (
 
 /**
  * Configure RTCRtpSender to unlock 15-25 Mbps bitrate and maintain 60fps
+ * Adaptable for cellular 4G networks without strict high floors.
  */
 export const configureVideoSender = async (
   sender: RTCRtpSender,
@@ -183,11 +156,8 @@ export const configureVideoSender = async (
     }
 
     const maxBitrateBps = bitrateMbps * 1_000_000;
-    const minBitrateBps = Math.min(8_000_000, Math.floor(maxBitrateBps * 0.6));
 
     parameters.encodings[0].maxBitrate = maxBitrateBps;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (parameters.encodings[0] as any).minBitrate = minBitrateBps;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (parameters.encodings[0] as any).maxFramerate = 60;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -215,7 +185,6 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
     const capabilities = RTCRtpReceiver.getCapabilities("video");
     if (!capabilities || !capabilities.codecs) return;
 
-    // H.264 is universally supported on iOS 17 Safari, then VP9 for Chromium
     const preferredCodecs = ["video/H264", "video/VP9"];
     const sorted = [...capabilities.codecs].sort((a, b) => {
       const aIndex = preferredCodecs.indexOf(a.mimeType);

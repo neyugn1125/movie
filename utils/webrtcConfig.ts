@@ -25,7 +25,6 @@ export const getIceServers = (): RTCIceServer[] => {
 
 /**
  * Universal, fixed Peer IDs for the cinema couple.
- * Always predictable so desktop and mobile 4G always find each other directly.
  */
 export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
   return `nguyen-crabie-cinema-${role}`;
@@ -45,10 +44,94 @@ export const isSafariIOS = (): boolean => {
 };
 
 /**
- * Injects clean b=AS/b=TIAS lines into SDP in strict RFC 4566 compliance:
- * - NEVER applied on Safari iOS
- * - ONLY applied on Offer descriptions (never modify Answer descriptions)
- * - DOES NOT mutate a=fmtp lines to avoid breaking H.264/VP9 decoder parsers
+ * Strips VP8, VP9, and AV1 from the video m-line in SDP, keeping only H.264
+ * and its associated RTX/RED/ULPFEC repair payload types.
+ */
+export const enforceH264OnlyInSdp = (sdp: string): string => {
+  if (!sdp) return sdp;
+
+  try {
+    const lines = sdp.split(/\r?\n/);
+    const h264PtSet = new Set<string>();
+    const forbiddenPtSet = new Set<string>();
+
+    // First pass: identify H264 payload types vs VP8/VP9/AV1 payload types
+    for (const line of lines) {
+      const rtpmapMatch = line.match(/^a=rtpmap:(\d+)\s+([a-zA-Z0-9.-]+)\//i);
+      if (rtpmapMatch) {
+        const pt = rtpmapMatch[1];
+        const codecName = rtpmapMatch[2].toUpperCase();
+        if (codecName === "H264") {
+          h264PtSet.add(pt);
+        } else if (codecName === "VP8" || codecName === "VP9" || codecName === "AV1") {
+          forbiddenPtSet.add(pt);
+        }
+      }
+    }
+
+    // Safety check: if browser has no H264 in SDP at all, return unmodified SDP
+    if (h264PtSet.size === 0) {
+      return sdp;
+    }
+
+    // Second pass: find RTX payload types linked to forbidden codecs (apt=...)
+    for (const line of lines) {
+      const fmtpMatch = line.match(/^a=fmtp:(\d+)\s+.*apt=(\d+)/i);
+      if (fmtpMatch) {
+        const rtxPt = fmtpMatch[1];
+        const associatedPt = fmtpMatch[2];
+        if (forbiddenPtSet.has(associatedPt)) {
+          forbiddenPtSet.add(rtxPt);
+        }
+      }
+    }
+
+    // Third pass: filter m=video line and drop a=rtpmap / a=fmtp / a=rtcp-fb for forbidden PTs
+    const filteredLines: string[] = [];
+    let inVideoSection = false;
+
+    for (const line of lines) {
+      if (line.startsWith("m=video ")) {
+        inVideoSection = true;
+        const parts = line.trim().split(/\s+/);
+        // m=video <port> <proto> <pt1> <pt2> ...
+        const headerParts = parts.slice(0, 3);
+        const payloadTypes = parts.slice(3);
+
+        // Keep only non-forbidden PTs, placing H264 PTs first
+        const allowedPts = payloadTypes.filter((pt) => !forbiddenPtSet.has(pt));
+        const h264Pts = allowedPts.filter((pt) => h264PtSet.has(pt));
+        const otherAllowedPts = allowedPts.filter((pt) => !h264PtSet.has(pt));
+
+        if (h264Pts.length > 0) {
+          filteredLines.push([...headerParts, ...h264Pts, ...otherAllowedPts].join(" "));
+          continue;
+        }
+      } else if (inVideoSection && line.startsWith("m=")) {
+        inVideoSection = false;
+      }
+
+      if (inVideoSection) {
+        const attrPtMatch = line.match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)\b/);
+        if (attrPtMatch && forbiddenPtSet.has(attrPtMatch[1])) {
+          continue; // Strip VP8/VP9/AV1 attribute line
+        }
+      }
+
+      filteredLines.push(line);
+    }
+
+    return filteredLines.join("\r\n");
+  } catch (err) {
+    console.warn("Could not enforce H264 in SDP:", err);
+    return sdp;
+  }
+};
+
+/**
+ * Enforces H.264 only and injects clean b=AS/b=TIAS lines into SDP in strict RFC 4566 compliance:
+ * - NEVER mutates Answer descriptions on Safari iOS
+ * - Strips VP8/VP9 and keeps H.264
  */
 export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string => {
   if (!sdp) return sdp;
@@ -63,10 +146,13 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
     return sdp;
   }
 
+  // First strip VP8/VP9 so only H.264 is negotiated
+  const h264Sdp = enforceH264OnlyInSdp(sdp);
+
   const targetKbps = bitrateMbps * 1000;
   const targetBps = bitrateMbps * 1_000_000;
 
-  const lines = sdp.split(/\r?\n/);
+  const lines = h264Sdp.split(/\r?\n/);
   const result: string[] = [];
   let inVideoSection = false;
   let bandwidthInjected = false;
@@ -113,9 +199,8 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
 };
 
 /**
- * Patches RTCPeerConnection to safely enforce high-bitrate SDP negotiation
+ * Patches RTCPeerConnection to safely enforce H.264-only + high-bitrate SDP negotiation
  * upon setLocalDescription without causing malformed SDP or repeated mutations.
- * Protected: NEVER touches Safari iOS and NEVER touches Answer descriptions.
  */
 export const patchPeerConnectionForBitrate = (
   pc: RTCPeerConnection,
@@ -146,7 +231,6 @@ export const patchPeerConnectionForBitrate = (
 
 /**
  * Configure RTCRtpSender to unlock 15-25 Mbps bitrate and maintain 60fps
- * Adaptable for cellular 4G networks without strict high floors.
  */
 export const configureVideoSender = async (
   sender: RTCRtpSender,
@@ -178,32 +262,32 @@ export const configureVideoSender = async (
 };
 
 /**
- * Naturally prioritizes modern, high-efficiency WebRTC codecs:
- * 1. VP9 (Native hardware YouTube/Netflix codec)
- * 2. H.264 (Universal Apple & PC hardware decode)
- * 3. VP8
+ * Strictly enforces H.264 ONLY (removes VP8, VP9, AV1 completely).
+ * Retains RTX/RED/ULPFEC repair codecs so packet loss recovery remains intact.
  */
 export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
   if (!("setCodecPreferences" in transceiver)) return;
-  if (!RTCRtpReceiver.getCapabilities) return;
+  if (typeof RTCRtpReceiver === "undefined" || !RTCRtpReceiver.getCapabilities) return;
 
   try {
     const capabilities = RTCRtpReceiver.getCapabilities("video");
     if (!capabilities || !capabilities.codecs) return;
 
-    const preferredCodecs = ["video/VP9", "video/H264", "video/VP8"];
-    const sorted = [...capabilities.codecs].sort((a, b) => {
-      const aIndex = preferredCodecs.indexOf(a.mimeType);
-      const bIndex = preferredCodecs.indexOf(b.mimeType);
-      if (aIndex !== -1 && bIndex === -1) return -1;
-      if (aIndex === -1 && bIndex !== -1) return 1;
-      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-      return 0;
+    const h264Codecs = capabilities.codecs.filter(
+      (c) => c.mimeType.toLowerCase() === "video/h264"
+    );
+
+    // Keep repair/retransmission mechanisms required by WebRTC video transport
+    const repairCodecs = capabilities.codecs.filter((c) => {
+      const mime = c.mimeType.toLowerCase();
+      return mime === "video/rtx" || mime === "video/red" || mime === "video/ulpfec";
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (transceiver as any).setCodecPreferences(sorted);
+    if (h264Codecs.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (transceiver as any).setCodecPreferences([...h264Codecs, ...repairCodecs]);
+    }
   } catch (err) {
-    console.warn("Unable to set codec preferences:", err);
+    console.warn("Unable to set H.264-only codec preferences:", err);
   }
 };

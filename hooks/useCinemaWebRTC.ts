@@ -731,8 +731,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           ) {
             currentRtt = Math.round((report.currentRoundTripTime || 0) * 1000);
           }
-          if (report.type === "codec") {
-            currentCodec = report.mimeType?.replace("video/", "") || currentCodec;
+          if (report.type === "codec" && report.mimeType?.toLowerCase().startsWith("video/")) {
+            currentCodec = report.mimeType.split("/")[1]?.toUpperCase() || "H264";
           }
         });
 

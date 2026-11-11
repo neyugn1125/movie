@@ -426,15 +426,15 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             onClick={() => {
               setIsRequestingStream(true);
               onRequestScreenStream?.();
-              setTimeout(() => setIsRequestingStream(false), 2000);
+              setTimeout(() => setIsRequestingStream(false), 5000);
             }}
             disabled={isRequestingStream}
-            className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-theme-primary to-theme-accent text-white font-bold text-sm sm:text-base shadow-glow hover:brightness-110 active:scale-95 transition-all flex items-center gap-2.5"
+            className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-theme-primary to-theme-accent text-white font-bold text-sm sm:text-base shadow-glow hover:brightness-110 active:scale-95 transition-all flex items-center gap-2.5 disabled:opacity-75 disabled:pointer-events-none"
           >
             {isRequestingStream ? (
               <>
                 <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
-                <span>Đang lấy luồng video...</span>
+                <span>Đang kết nối luồng (chờ 3-5s)...</span>
               </>
             ) : (
               <>

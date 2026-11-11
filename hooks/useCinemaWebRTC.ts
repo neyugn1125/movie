@@ -73,6 +73,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastHeartbeatReceivedRef = useRef<number>(0);
+  const lastScreenCallTimestampRef = useRef<number>(0);
+  const needsStreamRequestRef = useRef<boolean>(false);
 
   // Sync state to refs
   useEffect(() => {
@@ -108,6 +110,14 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
       const peer = peerRef.current;
       const stream = localScreenStreamRef.current;
       if (!peer || !stream) return;
+
+      const now = Date.now();
+      // Debounce: prevent rapid re-calling which resets ICE negotiation before connection establishes
+      if (now - lastScreenCallTimestampRef.current < 6000) {
+        console.log("[WebRTC] Call skipped: 6s debounce active to let WebRTC ICE establish");
+        return;
+      }
+      lastScreenCallTimestampRef.current = now;
 
       const destId = targetPeerId || partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole);
       console.log(`[WebRTC] Initiating video screen call to: ${destId}`);
@@ -397,7 +407,6 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             call.on("close", () => {
               console.log("[WebRTC] Remote screen call closed");
               setRemoteScreenStream(null);
-              setIsPartnerSharing(false);
               if (screenCallRef.current === call) {
                 screenCallRef.current = null;
               }
@@ -497,6 +506,9 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
       // 2. Serverless Signal Hub Sync (Ensures 100% presence & message receipt across 4G & WiFi)
       try {
+        const shouldRequestScreen = needsStreamRequestRef.current;
+        needsStreamRequestRef.current = false;
+
         const res = await fetch("/api/cinema-signal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -504,7 +516,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             role: myRole,
             peerId: currentMyPeerIdRef.current,
             isSharing: isSharingScreenRef.current,
-            requestScreen: isPartnerSharing && !remoteScreenStream,
+            requestScreen: shouldRequestScreen,
           }),
         });
         const data = await res.json();
@@ -537,19 +549,12 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
               setIsPartnerSharing(pSharing);
             }
 
-            // If partner is sharing and we don't have screen stream, request it
-            if (pSharing && !remoteScreenStream) {
-              if (dataConnRef.current && dataConnRef.current.open) {
-                try {
-                  dataConnRef.current.send(JSON.stringify({ type: "stream-request" }));
-                } catch (e) {}
-              }
-            }
-
-            // If we are sharing and partner is online, call or re-call when requested
+            // If we are sharing and partner is online, call when requested or upon first connect
             if (isSharingScreenRef.current && localScreenStreamRef.current && pPeerId) {
-              if (pRequestedScreen || !screenCallRef.current) {
-                console.log(`[WebRTC] Re-triggering screen stream to partner: ${pPeerId}`);
+              if (pRequestedScreen) {
+                console.log(`[WebRTC] Partner requested screen stream. Calling: ${pPeerId}`);
+                callPartnerWithScreenStream(pPeerId);
+              } else if (!screenCallRef.current) {
                 callPartnerWithScreenStream(pPeerId);
               }
             }
@@ -927,6 +932,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   // Manually Request Screen Stream (dual: DataChannel + Signal Hub)
   const requestScreenStream = useCallback(() => {
     console.log("[WebRTC] Manually requesting screen stream from partner...");
+    needsStreamRequestRef.current = true;
     if (dataConnRef.current && dataConnRef.current.open) {
       try {
         dataConnRef.current.send(JSON.stringify({ type: "stream-request" }));

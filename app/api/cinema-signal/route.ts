@@ -26,10 +26,12 @@ export async function POST(req: NextRequest) {
 
     // Update presence
     if (peerId) {
+      const prevSignal = roomSignals[role];
       roomSignals[role] = {
         peerId,
         isSharing: !!isSharing,
-        requestScreen: !!requestScreen,
+        // Set requestScreen only if explicitly requested, otherwise retain or clear
+        requestScreen: requestScreen ? true : (prevSignal?.requestScreen || false),
         lastSeen: Date.now(),
       };
     }
@@ -59,6 +61,12 @@ export async function POST(req: NextRequest) {
 
     const partner = roomSignals[partnerRole];
     const isPartnerOnline = partner ? Date.now() - partner.lastSeen < 12000 : false;
+    const partnerRequestedScreen = isPartnerOnline && partner ? !!partner.requestScreen : false;
+
+    // One-shot consumption: Once delivered to partner, reset to prevent repeated call triggering
+    if (partner && partner.requestScreen) {
+      partner.requestScreen = false;
+    }
 
     return NextResponse.json({
       success: true,
@@ -67,7 +75,7 @@ export async function POST(req: NextRequest) {
         peerId: isPartnerOnline && partner ? partner.peerId : null,
         isOnline: isPartnerOnline,
         isSharing: isPartnerOnline && partner ? partner.isSharing : false,
-        requestScreen: isPartnerOnline && partner ? !!partner.requestScreen : false,
+        requestScreen: partnerRequestedScreen,
       },
       messages: roomMessages,
       recentReactions: roomReactions.filter((r) => Date.now() - Number(r.id.split("-")[0] || 0) < 6000),

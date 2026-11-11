@@ -17,6 +17,7 @@ import {
   configureVideoSender,
   prioritizeVideoCodecs,
   patchPeerConnectionForBitrate,
+  installGlobalH264AndBitrateInterceptor,
 } from "@/utils/webrtcConfig";
 
 interface UseCinemaWebRTCProps {
@@ -120,6 +121,10 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
       }
     }
   }, [bitrate, degradation]);
+
+  useEffect(() => {
+    installGlobalH264AndBitrateInterceptor(() => bitrateRef.current);
+  }, []);
 
   // Trigger floating reaction locally with deduplication
   const addReactionAnimation = useCallback(
@@ -465,12 +470,12 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
                 console.log("[WebRTC] Native track event received:", event.track.kind);
                 composedStream.addTrack(event.track);
 
-                const tracksToUse =
+                const streamToSet =
                   event.streams && event.streams[0]
-                    ? event.streams[0].getTracks()
-                    : composedStream.getTracks();
+                    ? event.streams[0]
+                    : composedStream;
 
-                setRemoteScreenStream(new MediaStream(tracksToUse));
+                setRemoteScreenStream(streamToSet);
                 setIsPartnerSharing(true);
               });
             }
@@ -479,7 +484,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
             call.on("stream", (incomingStream: MediaStream) => {
               console.log("[WebRTC] PeerJS call.on('stream') received remote screen stream!");
-              setRemoteScreenStream(new MediaStream(incomingStream.getTracks()));
+              setRemoteScreenStream(incomingStream);
               setIsPartnerSharing(true);
             });
 
@@ -694,7 +699,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     };
   }, [myRole, partnerRole]);
 
-  // Realtime Stats monitoring
+  // Realtime Stats monitoring (Matches exact active video RTP codecId)
   useEffect(() => {
     statsIntervalRef.current = setInterval(async () => {
       const pc = activePeerConnectionRef.current;
@@ -710,6 +715,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         let currentFps = 0;
         let currentBytes = 0;
         let currentRtt = 0;
+        let activeVideoCodecId = "";
         let currentCodec = "H264";
 
         reports.forEach((report) => {
@@ -718,12 +724,18 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             currentHeight = report.frameHeight || currentHeight;
             currentFps = report.framesPerSecond || currentFps;
             currentBytes = report.bytesReceived || currentBytes;
+            if (report.codecId) {
+              activeVideoCodecId = report.codecId;
+            }
           }
           if (report.type === "outbound-rtp" && report.kind === "video") {
             currentWidth = report.frameWidth || currentWidth;
             currentHeight = report.frameHeight || currentHeight;
             currentFps = report.framesPerSecond || currentFps;
             currentBytes = report.bytesSent || currentBytes;
+            if (report.codecId) {
+              activeVideoCodecId = report.codecId;
+            }
           }
           if (
             report.type === "candidate-pair" &&
@@ -731,10 +743,15 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           ) {
             currentRtt = Math.round((report.currentRoundTripTime || 0) * 1000);
           }
-          if (report.type === "codec" && report.mimeType?.toLowerCase().startsWith("video/")) {
-            currentCodec = report.mimeType.split("/")[1]?.toUpperCase() || "H264";
-          }
         });
+
+        // Look up the exact codec report bound to the active video RTP stream
+        if (activeVideoCodecId && reports.has(activeVideoCodecId)) {
+          const codecReport = reports.get(activeVideoCodecId);
+          if (codecReport && codecReport.mimeType) {
+            currentCodec = codecReport.mimeType.replace(/^video\//i, "").toUpperCase();
+          }
+        }
 
         const now = Date.now();
         let calculatedBitrate = 0;

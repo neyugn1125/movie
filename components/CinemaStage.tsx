@@ -40,18 +40,53 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isHoveringControlsRef = useRef<boolean>(false);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
-  const [showStats, setShowStats] = useState(true);
+  const [showStats, setShowStats] = useState(false);
   const [isPlayBlocked, setIsPlayBlocked] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(true);
   const [isRequestingStream, setIsRequestingStream] = useState(false);
 
+  // YouTube-style auto-hiding player controls state
+  const [showControls, setShowControls] = useState(true);
+
   // Active stream is either remote (if partner is sharing) or local (if I am sharing)
   const activeStream = remoteStream || (isSharingScreen ? localStream : null);
 
+  // Schedule auto-hide after 3 seconds of inactivity (like YouTube)
+  const resetControlsTimer = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      if (!isHoveringControlsRef.current) {
+        setShowControls(false);
+      }
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    if (activeStream) {
+      resetControlsTimer();
+    } else {
+      setShowControls(true);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    }
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, [activeStream, resetControlsTimer]);
+
   const handleManualPlay = useCallback(() => {
+    resetControlsTimer();
     if (videoRef.current) {
       // Never unmute local screen preview to prevent self-echo on sender's PC
       const shouldMuteElement = !remoteStream;
@@ -72,11 +107,10 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
           }
         });
     }
-  }, [remoteStream, isVideoMuted]);
+  }, [remoteStream, isVideoMuted, resetControlsTimer]);
 
   const toggleVideoAudio = useCallback(() => {
     if (!remoteStream) {
-      // Sender is previewing their own screen: keep muted to avoid echo
       if (videoRef.current) {
         videoRef.current.muted = true;
       }
@@ -96,7 +130,10 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = activeStream;
-          videoRef.current.play().then(() => setIsPlayBlocked(false)).catch(() => {});
+          videoRef.current
+            .play()
+            .then(() => setIsPlayBlocked(false))
+            .catch(() => {});
         }
       }, 80);
     }
@@ -107,7 +144,9 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
     if (!video) return;
 
     if (activeStream) {
-      video.srcObject = activeStream;
+      if (video.srcObject !== activeStream) {
+        video.srcObject = activeStream;
+      }
 
       const triggerPlay = () => {
         video
@@ -123,17 +162,14 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
 
       triggerPlay();
 
-      // Listen for track unmuting (first RTP video frame arrival)
       activeStream.getVideoTracks().forEach((track) => {
         track.enabled = true;
         track.onunmute = () => {
-          console.log("[CinemaStage] Video track unmuted, triggering play...");
           triggerPlay();
         };
       });
 
       activeStream.onaddtrack = () => {
-        console.log("[CinemaStage] Stream addtrack received, re-triggering play...");
         video.srcObject = activeStream;
         triggerPlay();
       };
@@ -169,7 +205,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
     };
   }, []);
 
-  // Fullscreen toggle (Handles desktop, mobile, container and video fallback)
+  // Fullscreen toggle
   const toggleFullscreen = async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,7 +223,6 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
         } else if (doc.documentElement?.webkitRequestFullscreen) {
           doc.documentElement.webkitRequestFullscreen();
         } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
-          // iOS Safari on iPhone fallback
           (videoRef.current as any).webkitEnterFullscreen();
         }
       } else {
@@ -250,13 +285,23 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
   return (
     <div
       ref={containerRef}
+      onMouseMove={resetControlsTimer}
+      onMouseLeave={() => {
+        if (activeStream && !isHoveringControlsRef.current) {
+          setShowControls(false);
+        }
+      }}
+      onTouchStart={resetControlsTimer}
+      onKeyDown={resetControlsTimer}
       className={`relative w-full flex items-center justify-center overflow-hidden transition-all duration-300 ${
+        activeStream && !showControls && !isPlayBlocked ? "cursor-none" : "cursor-default"
+      } ${
         isFullscreen
           ? "fixed inset-0 z-50 w-screen h-screen bg-black p-0 m-0"
           : `flex-1 ${ambientMode ? "bg-black" : "bg-slate-950/80"}`
       }`}
     >
-      {/* Ambilight Glow Behind Video (Disabled in true fullscreen for pure cinema black) */}
+      {/* Ambilight Glow Behind Video */}
       {activeStream && !isFullscreen && (
         <div
           className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ${
@@ -298,6 +343,13 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             }`}
           />
 
+          {/* Top & Bottom subtle YouTube gradient vignette when controls are visible */}
+          <div
+            className={`pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/70 via-black/20 to-transparent transition-opacity duration-300 ${
+              showControls || isPlayBlocked ? "opacity-100" : "opacity-0"
+            }`}
+          />
+
           {/* iOS Safari Tap-to-Play Overlay */}
           {isPlayBlocked && (
             <div
@@ -316,8 +368,14 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </div>
           )}
 
-          {/* Current Stream Label Badge */}
-          <div className="absolute top-3 sm:top-6 left-3 sm:left-6 z-20 flex items-center gap-2">
+          {/* Current Stream Label Badge (Auto-hides with YouTube controls) */}
+          <div
+            className={`absolute top-3 sm:top-6 left-3 sm:left-6 z-20 flex items-center gap-2 transition-all duration-300 ${
+              showControls || isPlayBlocked
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 -translate-y-2 pointer-events-none"
+            }`}
+          >
             <div className="px-2.5 sm:px-3 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] sm:text-[11px] text-white flex items-center gap-1.5 sm:gap-2 shadow-lg">
               <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
               <span className="truncate max-w-[170px] sm:max-w-none">
@@ -328,12 +386,12 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </div>
           </div>
 
-          {/* Stats Overlay */}
+          {/* Stats Overlay (Stays visible when toggled on, or hides if toggled off) */}
           {showStats && stats && (
-            <div className="absolute top-3 sm:top-6 right-3 sm:right-6 z-20 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl p-2 sm:p-2.5 text-[9px] sm:text-[11px] font-mono text-slate-300 shadow-xl flex flex-col gap-0.5 sm:gap-1 min-w-[140px] sm:min-w-[190px]">
+            <div className="absolute top-3 sm:top-6 right-3 sm:right-6 z-20 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl p-2 sm:p-2.5 text-[9px] sm:text-[11px] font-mono text-slate-300 shadow-xl flex flex-col gap-0.5 sm:gap-1 min-w-[140px] sm:min-w-[190px] transition-opacity duration-300">
               <div className="flex items-center justify-between border-b border-white/10 pb-0.5 sm:pb-1 text-white font-semibold">
                 <span className="flex items-center gap-1 sm:gap-1.5">
-                  <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-theme-accent" /> Stats
+                  <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-theme-accent" /> Stats
                 </span>
                 <span className="text-[9px] sm:text-[10px] text-emerald-400">{stats.codec}</span>
               </div>
@@ -366,38 +424,63 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </div>
           )}
 
-          {/* DRM / Black Screen Tip Badge */}
-          <div className="absolute bottom-3 sm:bottom-6 left-3 sm:left-6 z-20 hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] text-slate-400">
+          {/* DRM / Black Screen Tip Badge (Auto-hides with YouTube controls) */}
+          <div
+            className={`absolute bottom-3 sm:bottom-6 left-3 sm:left-6 z-20 hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] text-slate-400 transition-all duration-300 ${
+              showControls || isPlayBlocked
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-2 pointer-events-none"
+            }`}
+          >
             <Info className="w-3 h-3 text-amber-400 flex-shrink-0" />
-            <span>Mẹo: Nếu chia sẻ YouTube/Netflix bị đen hình, hãy tắt Hardware Acceleration trong cài đặt trình duyệt hoặc chọn Chia sẻ Toàn màn hình.</span>
+            <span>
+              Mẹo: Nếu chia sẻ YouTube/Netflix bị đen hình, hãy tắt Hardware Acceleration trong cài đặt trình duyệt hoặc chọn Chia sẻ Toàn màn hình.
+            </span>
           </div>
 
-          {/* Floating On-Screen Quick Bar */}
-          <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1.5 sm:gap-2 bg-black/60 backdrop-blur-md border border-white/10 p-1 sm:p-1.5 rounded-xl shadow-lg">
-            {/* Audio Toggle (Unmute button for iOS / Mobile) */}
-            <button
-              onClick={toggleVideoAudio}
-              title={isVideoMuted ? "Bật âm thanh phim" : "Tắt tiếng phim"}
-              className={`p-1.5 sm:p-2 rounded-lg text-xs transition-colors flex items-center gap-1 ${
-                isVideoMuted
-                  ? "text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-400/30"
-                  : "text-emerald-400 hover:text-white hover:bg-white/10"
-              }`}
-            >
-              {isVideoMuted ? (
-                <>
-                  <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse" />
-                  <span className="hidden sm:inline text-[10px] font-medium">Bật tiếng</span>
-                </>
-              ) : (
-                <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              )}
-            </button>
+          {/* Floating On-Screen Quick Bar (Auto-hides like YouTube after 3s of mouse inactivity) */}
+          <div
+            onMouseEnter={() => {
+              isHoveringControlsRef.current = true;
+              setShowControls(true);
+              if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+            }}
+            onMouseLeave={() => {
+              isHoveringControlsRef.current = false;
+              resetControlsTimer();
+            }}
+            className={`absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1.5 sm:gap-2 bg-black/65 backdrop-blur-md border border-white/10 p-1 sm:p-1.5 rounded-xl shadow-lg transition-all duration-300 ${
+              showControls || isPlayBlocked
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-2 pointer-events-none"
+            }`}
+          >
+            {/* Audio Toggle (Only shown for remote viewer, hidden when previewing own screen) */}
+            {remoteStream && (
+              <button
+                onClick={toggleVideoAudio}
+                title={isVideoMuted ? "Bật âm thanh trực tiếp trên thẻ video" : "Tắt tiếng thẻ video"}
+                className={`p-1.5 sm:p-2 rounded-lg text-xs transition-colors flex items-center gap-1 ${
+                  isVideoMuted
+                    ? "text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-400/30"
+                    : "text-emerald-400 hover:text-white hover:bg-white/10"
+                }`}
+              >
+                {isVideoMuted ? (
+                  <>
+                    <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse" />
+                    <span className="hidden sm:inline text-[10px] font-medium">Bật tiếng</span>
+                  </>
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                )}
+              </button>
+            )}
 
             {/* Stats Toggle */}
             <button
               onClick={() => setShowStats(!showStats)}
-              title={showStats ? "Ẩn thông số kỹ thuật" : "Hiện thông số kỹ thuật"}
+              title={showStats ? "Ẩn thông số kỹ thuật (Stats for nerds)" : "Hiện thông số kỹ thuật (Stats for nerds)"}
               className={`p-1.5 sm:p-2 rounded-lg text-xs transition-colors ${
                 showStats ? "text-theme-accent bg-white/10" : "text-slate-400 hover:text-white"
               }`}
@@ -430,7 +513,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
               <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
-            {/* PiP Button (Desktop / Supported browsers) */}
+            {/* PiP Button */}
             <button
               onClick={togglePiP}
               title="Hình trong hình (Picture in Picture)"

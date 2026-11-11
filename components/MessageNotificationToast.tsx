@@ -25,7 +25,7 @@ export const MessageNotificationToast: React.FC<MessageNotificationToastProps> =
       const timer = setTimeout(() => {
         setIsVisible(false);
         setTimeout(onClose, 300);
-      }, 4500);
+      }, 10000);
 
       return () => clearTimeout(timer);
     } else {

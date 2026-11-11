@@ -25,7 +25,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       setErrorMsg("");
       onLogin("crabie");
     } else {
-      setErrorMsg("Mật khẩu không đúng! Chỉ dành riêng cho Nguyen and Crabie");
+      setErrorMsg("Mật khẩu không đúng!");
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);
     }
@@ -60,7 +60,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-2 uppercase tracking-wider">
-              Mật khẩu rạp phim
+              Mật khẩu
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">

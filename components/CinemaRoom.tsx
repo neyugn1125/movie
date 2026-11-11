@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { UserRole } from "@/types/cinema";
 import { useCinemaWebRTC } from "@/hooks/useCinemaWebRTC";
 import { useAudioDucking } from "@/hooks/useAudioDucking";
@@ -17,6 +17,9 @@ interface CinemaRoomProps {
 
 export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
   const partnerName = myRole === "nguyen" ? "Crabie" : "Nguyen";
+
+  // Dedicated HTML5 Audio element for remote voice stream (bypasses Chromium WebRTC AudioContext silence bug)
+  const remoteVoiceAudioRef = useRef<HTMLAudioElement>(null);
 
   // WebRTC Core Hook
   const {
@@ -61,20 +64,39 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
 
-  // Resume AudioContext on user interaction or when streams arrive
+  // Bind remote voice stream to dedicated audio tag
+  useEffect(() => {
+    if (remoteVoiceAudioRef.current) {
+      if (remoteVoiceStream) {
+        remoteVoiceAudioRef.current.srcObject = remoteVoiceStream;
+        remoteVoiceAudioRef.current.play().catch((err) => {
+          console.warn("[Voice] Auto-play was prevented until user interaction:", err);
+        });
+      } else {
+        remoteVoiceAudioRef.current.srcObject = null;
+      }
+    }
+  }, [remoteVoiceStream]);
+
+  // Resume audio playback upon any user gesture
   useEffect(() => {
     const handleInteraction = () => {
       resumeAudioContext();
+      if (remoteVoiceAudioRef.current && remoteVoiceAudioRef.current.paused && remoteVoiceStream) {
+        remoteVoiceAudioRef.current.play().catch(() => {});
+      }
     };
+
     window.addEventListener("click", handleInteraction);
     window.addEventListener("keydown", handleInteraction);
     window.addEventListener("touchstart", handleInteraction);
+
     return () => {
       window.removeEventListener("click", handleInteraction);
       window.removeEventListener("keydown", handleInteraction);
       window.removeEventListener("touchstart", handleInteraction);
     };
-  }, [resumeAudioContext]);
+  }, [remoteVoiceStream, resumeAudioContext]);
 
   useEffect(() => {
     if (remoteVoiceStream || remoteScreenStream) {
@@ -101,6 +123,9 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
 
   return (
     <div className="relative min-h-screen w-full flex flex-col bg-theme-bg text-white overflow-hidden select-none">
+      {/* Hidden dedicated HTML5 audio element for stable voice chat playback */}
+      <audio ref={remoteVoiceAudioRef} autoPlay playsInline className="hidden" />
+
       {/* Reaction Particles Floating Overlay */}
       <ReactionOverlay reactions={reactions} />
 

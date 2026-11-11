@@ -5,6 +5,8 @@ export const getIceServers = (): RTCIceServer[] => {
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
     { urls: "stun:global.stun.twilio.com:3478" },
   ];
@@ -31,46 +33,77 @@ export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
   return `${domainPrefix}-${role}`;
 };
 
+export const getRandomSessionPeerId = (role: "nguyen" | "crabie") => {
+  const base = getPeerIdForRole(role);
+  const randomSuffix = Math.random().toString(36).substring(2, 7);
+  return `${base}-${randomSuffix}`;
+};
+
 /**
  * Injects Google-specific high-bandwidth parameters and b=AS/b=TIAS lines
- * into SDP to bypass Chrome's default 1.5 - 2 Mbps bandwidth cap.
+ * into SDP in strict RFC 4566 compliance:
+ * In media section m=video, b= lines MUST be placed AFTER c= line (if present)
+ * and BEFORE any a= attribute lines.
  */
 export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string => {
+  if (!sdp) return sdp;
+
   const targetKbps = bitrateMbps * 1000;
   const targetBps = bitrateMbps * 1_000_000;
   const minKbps = Math.min(8000, Math.floor(targetKbps * 0.6));
   const startKbps = targetKbps;
   const maxKbps = Math.max(25000, targetKbps);
 
-  const lines = sdp.split("\r\n");
+  const lines = sdp.split(/\r?\n/);
   const result: string[] = [];
   let inVideoSection = false;
-  let hasBandwidthLine = false;
+  let bandwidthInjected = false;
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
+    const line = lines[i];
 
     if (line.startsWith("m=video")) {
       inVideoSection = true;
-      hasBandwidthLine = false;
+      bandwidthInjected = false;
       result.push(line);
       continue;
     } else if (inVideoSection && line.startsWith("m=")) {
       inVideoSection = false;
     }
 
-    // Inject bandwidth lines under m=video before attributes
-    if (inVideoSection && !hasBandwidthLine && (line.startsWith("c=") || line.startsWith("a="))) {
-      result.push(`b=AS:${targetKbps}`);
-      result.push(`b=TIAS:${targetBps}`);
-      hasBandwidthLine = true;
-    }
+    if (inVideoSection) {
+      // Remove any pre-existing bandwidth lines to prevent duplicates
+      if (line.startsWith("b=AS:") || line.startsWith("b=TIAS:")) {
+        continue;
+      }
 
-    // Enhance fmtp lines for video codecs (VP9, H264, VP8) with Chrome BWE parameters
-    if (inVideoSection && line.startsWith("a=fmtp:")) {
-      const googleBitrateParams = `;x-google-min-bitrate=${minKbps};x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
-      if (!line.includes("x-google-min-bitrate")) {
-        line += googleBitrateParams;
+      // RFC 4566 sequence: m= -> c= -> b= -> a=
+      // If c= line exists, append it first, then inject b= lines immediately
+      if (line.startsWith("c=")) {
+        result.push(line);
+        if (!bandwidthInjected) {
+          result.push(`b=AS:${targetKbps}`);
+          result.push(`b=TIAS:${targetBps}`);
+          bandwidthInjected = true;
+        }
+        continue;
+      }
+
+      // If there is no c= line in this media block, inject b= before the first a= line
+      if (line.startsWith("a=") && !bandwidthInjected) {
+        result.push(`b=AS:${targetKbps}`);
+        result.push(`b=TIAS:${targetBps}`);
+        bandwidthInjected = true;
+      }
+
+      // Enhance fmtp lines for video codecs (VP9, H264, VP8) with Chrome BWE parameters
+      if (line.startsWith("a=fmtp:")) {
+        let enhancedLine = line;
+        if (!enhancedLine.includes("x-google-min-bitrate")) {
+          enhancedLine += `;x-google-min-bitrate=${minKbps};x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
+        }
+        result.push(enhancedLine);
+        continue;
       }
     }
 
@@ -81,7 +114,8 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
 };
 
 /**
- * Patches RTCPeerConnection to enforce high-bitrate SDP negotiation on both Offer and Answer
+ * Patches RTCPeerConnection to safely enforce high-bitrate SDP negotiation
+ * upon setLocalDescription without causing malformed SDP or repeated mutations.
  */
 export const patchPeerConnectionForBitrate = (
   pc: RTCPeerConnection,
@@ -93,28 +127,6 @@ export const patchPeerConnectionForBitrate = (
   anyPc._bitratePatched = true;
 
   try {
-    const origCreateOffer = pc.createOffer.bind(pc);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (pc as any).createOffer = async function (...args: any[]) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const offer: any = await (origCreateOffer as any)(...args);
-      if (offer && offer.sdp) {
-        offer.sdp = enhanceSdpBitrate(offer.sdp, targetBitrateMbps);
-      }
-      return offer;
-    };
-
-    const origCreateAnswer = pc.createAnswer.bind(pc);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (pc as any).createAnswer = async function (...args: any[]) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const answer: any = await (origCreateAnswer as any)(...args);
-      if (answer && answer.sdp) {
-        answer.sdp = enhanceSdpBitrate(answer.sdp, targetBitrateMbps);
-      }
-      return answer;
-    };
-
     const origSetLocalDescription = pc.setLocalDescription.bind(pc);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (pc as any).setLocalDescription = async function (...args: any[]) {
@@ -145,13 +157,18 @@ export const configureVideoSender = async (
     }
 
     const maxBitrateBps = bitrateMbps * 1_000_000;
-    const minBitrateBps = Math.min(8_000_000, Math.floor(maxBitrateBps * 0.6)); // Force high floor
+    const minBitrateBps = Math.min(8_000_000, Math.floor(maxBitrateBps * 0.6)); // High floor for clarity
 
     parameters.encodings[0].maxBitrate = maxBitrateBps;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (parameters.encodings[0] as any).minBitrate = minBitrateBps;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (parameters.encodings[0] as any).maxFramerate = 60;
-    (parameters.encodings[0] as any).scaleResolutionDownBy = 1.0; // Never downscale
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (parameters.encodings[0] as any).scaleResolutionDownBy = 1.0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (parameters.encodings[0] as any).networkPriority = "high";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (parameters as any).degradationPreference = degradation; // Solid 60fps
 
     await sender.setParameters(parameters);
@@ -181,6 +198,7 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
       return 0;
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (transceiver as any).setCodecPreferences(sorted);
   } catch (err) {
     console.warn("Unable to set codec preferences:", err);

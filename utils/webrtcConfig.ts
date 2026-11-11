@@ -204,7 +204,8 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
     const capabilities = RTCRtpReceiver.getCapabilities("video");
     if (!capabilities || !capabilities.codecs) return;
 
-    const getScore = (c: RTCRtpCodecCapability): number => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const getScore = (c: any): number => {
       if (c.mimeType.toLowerCase() === "video/h264") {
         const fmtp = (c.sdpFmtpLine || "").toLowerCase();
         // Safari iOS 17 prefers packetization-mode=1 and baseline/main profiles

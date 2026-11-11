@@ -94,8 +94,10 @@ export const patchPeerConnectionForBitrate = (
 
   try {
     const origCreateOffer = pc.createOffer.bind(pc);
-    pc.createOffer = async function (options?: RTCOfferOptions) {
-      const offer = await origCreateOffer(options);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pc as any).createOffer = async function (...args: any[]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const offer: any = await (origCreateOffer as any)(...args);
       if (offer && offer.sdp) {
         offer.sdp = enhanceSdpBitrate(offer.sdp, targetBitrateMbps);
       }
@@ -103,8 +105,10 @@ export const patchPeerConnectionForBitrate = (
     };
 
     const origCreateAnswer = pc.createAnswer.bind(pc);
-    pc.createAnswer = async function (options?: RTCAnswerOptions) {
-      const answer = await origCreateAnswer(options);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pc as any).createAnswer = async function (...args: any[]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const answer: any = await (origCreateAnswer as any)(...args);
       if (answer && answer.sdp) {
         answer.sdp = enhanceSdpBitrate(answer.sdp, targetBitrateMbps);
       }
@@ -112,11 +116,14 @@ export const patchPeerConnectionForBitrate = (
     };
 
     const origSetLocalDescription = pc.setLocalDescription.bind(pc);
-    pc.setLocalDescription = async function (description?: RTCSessionDescriptionInit) {
-      if (description && description.sdp) {
-        description.sdp = enhanceSdpBitrate(description.sdp, targetBitrateMbps);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pc as any).setLocalDescription = async function (...args: any[]) {
+      const desc = args[0];
+      if (desc && desc.sdp) {
+        desc.sdp = enhanceSdpBitrate(desc.sdp, targetBitrateMbps);
       }
-      return origSetLocalDescription(description);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (origSetLocalDescription as any)(...args);
     };
   } catch (err) {
     console.warn("Could not patch RTCPeerConnection for SDP bitrate:", err);

@@ -18,14 +18,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     e.preventDefault();
     const trimmed = password.trim().toLowerCase();
 
-    if (trimmed === "neyugn") {
+    if (trimmed === "nguyen" || trimmed === "neyugn") {
       setErrorMsg("");
-      onLogin("neyugn");
+      onLogin("nguyen");
     } else if (trimmed === "crabie") {
       setErrorMsg("");
       onLogin("crabie");
     } else {
-      setErrorMsg("Mật khẩu không đúng! Chỉ dành riêng cho Neyugn & Crabie");
+      setErrorMsg("Mật khẩu không đúng! Chỉ dành riêng cho Nguyen and Crabie");
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);
     }
@@ -49,10 +49,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             <Film className="w-8 h-8 text-sky-400" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-sky-400 via-white to-pink-400 bg-clip-text text-transparent">
-            Neyugn & Crabie Cinema
+            Nguyen and Crabie Cinema
           </h1>
           <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" /> Rạp phim trực tuyến 2K 60fps dành riêng cho hai người
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" /> Rạp phim trực tuyến dành riêng cho hai người
           </p>
         </div>
 
@@ -106,7 +106,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         {/* Footnote hint */}
         <div className="mt-6 text-center">
           <p className="text-[11px] text-slate-500">
-            Giao diện sẽ tự động đổi sang màu <span className="text-sky-400 font-medium">Xanh Da Trời</span> (Neyugn) hoặc{" "}
+            Giao diện sẽ tự động đổi sang màu <span className="text-sky-400 font-medium">Xanh Da Trời</span> (Nguyen) hoặc{" "}
             <span className="text-pink-400 font-medium">Hồng Phấn</span> (Crabie) theo mật khẩu.
           </p>
         </div>

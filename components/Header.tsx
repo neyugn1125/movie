@@ -19,8 +19,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleAmbient,
   onLogout,
 }) => {
-  const myName = myRole === "neyugn" ? "Neyugn" : "Crabie";
-  const partnerName = myRole === "neyugn" ? "Crabie" : "Neyugn";
+  const myName = myRole === "nguyen" ? "Nguyen" : "Crabie";
+  const partnerName = myRole === "nguyen" ? "Crabie" : "Nguyen";
 
   return (
     <header
@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
         <div>
           <h1 className="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-2">
-            Neyugn & Crabie Cinema
+            Nguyen and Crabie Cinema
           </h1>
           <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
             <span>Bạn đang là:</span>

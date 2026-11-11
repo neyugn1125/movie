@@ -13,7 +13,8 @@
   --theme-glow: rgba(56, 189, 248, 0.35);
 }
 
-/* Neyugn: Sky Blue Theme */
+/* Nguyen: Sky Blue Theme */
+[data-theme="nguyen"],
 [data-theme="neyugn"] {
   --theme-primary: #0284c7;
   --theme-secondary: #0369a1;

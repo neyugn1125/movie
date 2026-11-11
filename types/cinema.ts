@@ -1,4 +1,4 @@
-export type UserRole = "neyugn" | "crabie";
+export type UserRole = "nguyen" | "crabie";
 
 export type BitrateTier = 8 | 15 | 25; // Mbps
 

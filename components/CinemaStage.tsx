@@ -123,7 +123,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>
                 {isPartnerSharing
-                  ? `Màn hình rạp phim của ${partnerName} (2K 60fps)`
+                  ? `Màn hình rạp phim của ${partnerName}`
                   : "Màn hình của bạn đang phát trực tiếp"}
               </span>
             </div>
@@ -213,7 +213,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
           <p className="text-xs text-slate-400 mb-6 leading-relaxed">
             Bạn hoặc {partnerName} có thể bấm nút{" "}
             <span className="text-theme-accent font-semibold">"Bắt đầu chia sẻ màn hình"</span> ở
-            thanh điều khiển bên dưới để bắt đầu chiếu phim với độ nét **2K @ 60fps**.
+            thanh điều khiển bên dưới để bắt đầu chiếu phim.
           </p>
 
           {/* DRM / Anti-Black Screen Tip Box */}

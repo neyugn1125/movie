@@ -22,10 +22,10 @@ export const getIceServers = (): RTCIceServer[] => {
 };
 
 export const PEER_ID_PREFIX = "cinema-room-";
-export const getPeerIdForRole = (role: "neyugn" | "crabie") => `${PEER_ID_PREFIX}${role}`;
+export const getPeerIdForRole = (role: "nguyen" | "crabie") => `${PEER_ID_PREFIX}${role}`;
 
 /**
- * Configure RTCRtpSender to enforce 2K 60fps bitrate and degradation preference
+ * Configure RTCRtpSender to optimize bitrate and degradation preference
  */
 export const configureVideoSender = async (
   sender: RTCRtpSender,

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Neyugn & Crabie Cinema | Rạp Phim Trực Tuyến 2K 60fps",
+  title: "Nguyen and Crabie Cinema | Rạp Phim Trực Tuyến",
   description:
-    "Trang web xem phim trực tuyến P2P chất lượng cao 2K 60fps kèm Voice Chat dành riêng cho cặp đôi.",
+    "Trang web xem phim trực tuyến P2P kèm Voice Chat dành riêng cho cặp đôi.",
   icons: {
     icon: "/favicon.ico",
   },

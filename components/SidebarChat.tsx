@@ -89,8 +89,8 @@ export const SidebarChat: React.FC<SidebarChatProps> = ({
         ) : (
           messages.map((m) => {
             const isMe = m.sender === myRole;
-            const isSenderNeyugn = m.sender === "neyugn";
-            const senderDisplayName = isSenderNeyugn ? "Neyugn" : "Crabie";
+            const isSenderNguyen = m.sender === "nguyen" || (m.sender as string) === "neyugn";
+            const senderDisplayName = isSenderNguyen ? "Nguyen" : "Crabie";
 
             return (
               <div
@@ -106,7 +106,7 @@ export const SidebarChat: React.FC<SidebarChatProps> = ({
                 </span>
                 <div
                   className={`max-w-[85%] px-3.5 py-2 rounded-2xl text-xs leading-relaxed break-words shadow-md ${
-                    isSenderNeyugn
+                    isSenderNguyen
                       ? "bg-sky-500/20 text-sky-100 border border-sky-500/30 rounded-tr-sm"
                       : "bg-pink-500/20 text-pink-100 border border-pink-500/30 rounded-tl-sm"
                   }`}

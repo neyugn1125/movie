@@ -11,7 +11,8 @@ const CinemaRoom = dynamic(
   { ssr: false }
 );
 
-const STORAGE_KEY = "neyugn_crabie_cinema_role";
+const STORAGE_KEY = "nguyen_crabie_cinema_role";
+const OLD_STORAGE_KEY = "neyugn_crabie_cinema_role";
 
 export default function Home() {
   const [role, setRole] = useState<UserRole | null>(null);
@@ -19,10 +20,17 @@ export default function Home() {
 
   useEffect(() => {
     setIsMounted(true);
-    const savedRole = localStorage.getItem(STORAGE_KEY) as UserRole | null;
-    if (savedRole === "neyugn" || savedRole === "crabie") {
-      setRole(savedRole);
-      document.documentElement.setAttribute("data-theme", savedRole);
+    let savedRole = localStorage.getItem(STORAGE_KEY) as string | null;
+    if (!savedRole) {
+      savedRole = localStorage.getItem(OLD_STORAGE_KEY);
+    }
+
+    if (savedRole === "nguyen" || savedRole === "neyugn") {
+      setRole("nguyen");
+      document.documentElement.setAttribute("data-theme", "nguyen");
+    } else if (savedRole === "crabie") {
+      setRole("crabie");
+      document.documentElement.setAttribute("data-theme", "crabie");
     }
   }, []);
 

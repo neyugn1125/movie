@@ -76,7 +76,7 @@ export const ControlDock: React.FC<ControlDockProps> = ({
         <div className="pointer-events-auto mb-3 p-4 rounded-2xl bg-slate-900/90 border border-white/10 backdrop-blur-xl shadow-2xl text-xs text-white flex flex-col gap-3 min-w-[280px] animate-fade-in">
           <div className="flex items-center justify-between border-b border-white/10 pb-2">
             <span className="font-semibold flex items-center gap-1.5 text-theme-accent">
-              <Settings2 className="w-4 h-4" /> Cài Đặt Luồng 2K 60fps
+              <Settings2 className="w-4 h-4" /> Cài Đặt Luồng Phát
             </span>
             <button
               onClick={() => setShowSettingsMenu(false)}
@@ -126,7 +126,7 @@ export const ControlDock: React.FC<ControlDockProps> = ({
                     : "bg-white/5 hover:bg-white/10 text-slate-300"
                 }`}
               >
-                Ưu tiên 60fps
+                Ưu tiên mượt mà
               </button>
               <button
                 onClick={() => setSelectedDegradation("maintain-resolution")}
@@ -136,7 +136,7 @@ export const ControlDock: React.FC<ControlDockProps> = ({
                     : "bg-white/5 hover:bg-white/10 text-slate-300"
                 }`}
               >
-                Ưu tiên Nét 2K
+                Ưu tiên độ nét
               </button>
             </div>
           </div>
@@ -163,14 +163,14 @@ export const ControlDock: React.FC<ControlDockProps> = ({
             ) : (
               <>
                 <ScreenShare className="w-4 h-4" />
-                <span className="hidden sm:inline">Chiếu Phim 2K</span>
+                <span className="hidden sm:inline">Chiếu Phim</span>
               </>
             )}
           </button>
           {!isSharingScreen && (
             <button
               onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-              title="Tùy chọn Bitrate & FPS"
+              title="Tùy chọn chất lượng phát"
               className="ml-1 p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/5 transition-colors"
             >
               <Sliders className="w-4 h-4" />

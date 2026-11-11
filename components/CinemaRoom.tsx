@@ -16,7 +16,7 @@ interface CinemaRoomProps {
 }
 
 export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
-  const partnerName = myRole === "neyugn" ? "Crabie" : "Neyugn";
+  const partnerName = myRole === "nguyen" ? "Crabie" : "Nguyen";
 
   // WebRTC Core Hook
   const {

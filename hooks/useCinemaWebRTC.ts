@@ -23,7 +23,7 @@ interface UseCinemaWebRTCProps {
 }
 
 export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
-  const partnerRole: UserRole = myRole === "neyugn" ? "crabie" : "neyugn";
+  const partnerRole: UserRole = myRole === "nguyen" ? "crabie" : "nguyen";
   const myPeerId = getPeerIdForRole(myRole);
   const partnerPeerId = getPeerIdForRole(partnerRole);
 
@@ -394,7 +394,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     };
   }, [bitrate, isSharingScreen, remoteScreenStream]);
 
-  // Start 2K 60fps Screen Sharing
+  // Start Screen Sharing
   const startScreenShare = useCallback(
     async (targetBitrate: BitrateTier = bitrate, targetDegradation: DegradationPreference = degradation) => {
       try {

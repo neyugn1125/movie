@@ -99,3 +99,5 @@ class SoundEffectManager {
 }
 
 export const soundManager = new SoundEffectManager();
+export const soundEffects = soundManager;
+export default soundManager;

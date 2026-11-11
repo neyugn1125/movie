@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Default Neutral Theme */
+  --theme-primary: #0284c7;
+  --theme-secondary: #0369a1;
+  --theme-accent: #38bdf8;
+  --theme-bg: #0b0f19;
+  --theme-surface: rgba(15, 23, 42, 0.7);
+  --theme-border: rgba(56, 189, 248, 0.3);
+  --theme-glow: rgba(56, 189, 248, 0.35);
+}
+
+/* Neyugn: Sky Blue Theme */
+[data-theme="neyugn"] {
+  --theme-primary: #0284c7;
+  --theme-secondary: #0369a1;
+  --theme-accent: #38bdf8;
+  --theme-bg: #071524;
+  --theme-surface: rgba(12, 38, 64, 0.7);
+  --theme-border: rgba(56, 189, 248, 0.35);
+  --theme-glow: rgba(56, 189, 248, 0.4);
+}
+
+/* Crabie: Sweet Pink Theme */
+[data-theme="crabie"] {
+  --theme-primary: #db2777;
+  --theme-secondary: #be185d;
+  --theme-accent: #f472b6;
+  --theme-bg: #1c0a15;
+  --theme-surface: rgba(48, 14, 34, 0.7);
+  --theme-border: rgba(244, 114, 182, 0.35);
+  --theme-glow: rgba(244, 114, 182, 0.4);
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

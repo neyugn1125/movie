@@ -107,7 +107,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             ref={videoRef}
             autoPlay
             playsInline
-            muted={isSharingScreen && !remoteStream} // Mute local preview to prevent echo for self
+            muted={true} // Film audio is managed by Web Audio API for volume control & ducking
             className={`w-full h-full rounded-2xl shadow-2xl transition-all duration-300 ${
               fitMode === "contain"
                 ? "object-contain"

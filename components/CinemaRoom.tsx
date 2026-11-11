@@ -61,15 +61,26 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
 
-  // Resume AudioContext on first user interaction to comply with browser autoplay policies
+  // Resume AudioContext on user interaction or when streams arrive
   useEffect(() => {
-    const handleFirstInteraction = () => {
+    const handleInteraction = () => {
       resumeAudioContext();
-      window.removeEventListener("click", handleFirstInteraction);
     };
-    window.addEventListener("click", handleFirstInteraction);
-    return () => window.removeEventListener("click", handleFirstInteraction);
+    window.addEventListener("click", handleInteraction);
+    window.addEventListener("keydown", handleInteraction);
+    window.addEventListener("touchstart", handleInteraction);
+    return () => {
+      window.removeEventListener("click", handleInteraction);
+      window.removeEventListener("keydown", handleInteraction);
+      window.removeEventListener("touchstart", handleInteraction);
+    };
   }, [resumeAudioContext]);
+
+  useEffect(() => {
+    if (remoteVoiceStream || remoteScreenStream) {
+      resumeAudioContext();
+    }
+  }, [remoteVoiceStream, remoteScreenStream, resumeAudioContext]);
 
   // Track unread messages when chat is closed
   useEffect(() => {

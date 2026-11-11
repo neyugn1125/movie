@@ -5,8 +5,8 @@ export const getIceServers = (): RTCIceServer[] => {
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
-    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
+    { urls: "stun:global.stun.twilio.com:3478" },
   ];
 
   // Optional custom TURN servers via environment variables (e.g. Metered or Cloudflare Calls)
@@ -21,8 +21,20 @@ export const getIceServers = (): RTCIceServer[] => {
   return servers;
 };
 
-export const PEER_ID_PREFIX = "cinema-room-";
-export const getPeerIdForRole = (role: "nguyen" | "crabie") => `${PEER_ID_PREFIX}${role}`;
+/**
+ * Generate unique, deterministic Peer ID scoped to the deployed domain
+ * to prevent collisions with other PeerJS users across the globe.
+ */
+export const getPeerIdForRole = (role: "nguyen" | "crabie") => {
+  let domainPrefix = "cinema-room";
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
+      domainPrefix = hostname.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+    }
+  }
+  return `${domainPrefix}-${role}`;
+};
 
 /**
  * Configure RTCRtpSender to optimize bitrate and degradation preference
@@ -69,7 +81,7 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
       return 0;
     });
 
-    transceiver.setCodecPreferences(sorted);
+    (transceiver as any).setCodecPreferences(sorted);
   } catch (err) {
     console.warn("Unable to set codec preferences:", err);
   }

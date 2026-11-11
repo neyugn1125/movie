@@ -436,6 +436,20 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     };
     window.addEventListener("beforeunload", handleUnload);
 
+    // Reconnect on iOS Safari when switching tabs or unlocking phone
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        console.log("[WebRTC] App resumed to foreground on iOS/Mobile, checking connection...");
+        if (peerInstance && peerInstance.disconnected && !peerInstance.destroyed) {
+          peerInstance.reconnect();
+        }
+        if (!dataConnRef.current || !dataConnRef.current.open) {
+          connectToPartner();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     // Signaling sync & heartbeat loop every 2.5s
     syncIntervalRef.current = setInterval(async () => {
       if (isDisposed) return;
@@ -504,6 +518,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     return () => {
       isDisposed = true;
       window.removeEventListener("beforeunload", handleUnload);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
       if (peerInstance && !peerInstance.destroyed) {
         peerInstance.destroy();

@@ -9,6 +9,22 @@ export const getIceServers = (): RTCIceServer[] => {
     { urls: "stun:stun4.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
     { urls: "stun:global.stun.twilio.com:3478" },
+    // Free Public TURN relay from OpenRelay for cellular (4G/5G) and strict NAT on iOS/Android
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ];
 
   if (process.env.NEXT_PUBLIC_TURN_URL) {
@@ -40,6 +56,17 @@ export const getRandomSessionPeerId = (role: "nguyen" | "crabie") => {
 };
 
 /**
+ * Checks if the current browser environment is Safari / WebKit on iOS
+ */
+export const isSafariIOS = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isWebKit = /WebKit/i.test(ua) && !/CriOS|FxiOS|OPiOS|mercury/i.test(ua);
+  return isIOS || isWebKit;
+};
+
+/**
  * Injects Google-specific high-bandwidth parameters and b=AS/b=TIAS lines
  * into SDP in strict RFC 4566 compliance:
  * In media section m=video, b= lines MUST be placed AFTER c= line (if present)
@@ -58,6 +85,7 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
   const result: string[] = [];
   let inVideoSection = false;
   let bandwidthInjected = false;
+  const isIOS = isSafariIOS();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -78,7 +106,6 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
       }
 
       // RFC 4566 sequence: m= -> c= -> b= -> a=
-      // If c= line exists, append it first, then inject b= lines immediately
       if (line.startsWith("c=")) {
         result.push(line);
         if (!bandwidthInjected) {
@@ -89,15 +116,14 @@ export const enhanceSdpBitrate = (sdp: string, bitrateMbps: number = 15): string
         continue;
       }
 
-      // If there is no c= line in this media block, inject b= before the first a= line
       if (line.startsWith("a=") && !bandwidthInjected) {
         result.push(`b=AS:${targetKbps}`);
         result.push(`b=TIAS:${targetBps}`);
         bandwidthInjected = true;
       }
 
-      // Enhance fmtp lines for video codecs (VP9, H264, VP8) with Chrome BWE parameters
-      if (line.startsWith("a=fmtp:")) {
+      // Only inject Chromium-proprietary bitrate params if not strictly on iOS Safari (to prevent SDP parse error)
+      if (!isIOS && line.startsWith("a=fmtp:")) {
         let enhancedLine = line;
         if (!enhancedLine.includes("x-google-min-bitrate")) {
           enhancedLine += `;x-google-min-bitrate=${minKbps};x-google-max-bitrate=${maxKbps};x-google-start-bitrate=${startKbps}`;
@@ -157,7 +183,7 @@ export const configureVideoSender = async (
     }
 
     const maxBitrateBps = bitrateMbps * 1_000_000;
-    const minBitrateBps = Math.min(8_000_000, Math.floor(maxBitrateBps * 0.6)); // High floor for clarity
+    const minBitrateBps = Math.min(8_000_000, Math.floor(maxBitrateBps * 0.6));
 
     parameters.encodings[0].maxBitrate = maxBitrateBps;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -169,7 +195,7 @@ export const configureVideoSender = async (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (parameters.encodings[0] as any).networkPriority = "high";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (parameters as any).degradationPreference = degradation; // Solid 60fps
+    (parameters as any).degradationPreference = degradation;
 
     await sender.setParameters(parameters);
   } catch (err) {
@@ -178,7 +204,8 @@ export const configureVideoSender = async (
 };
 
 /**
- * Prioritize hardware-accelerated VP9 or H.264 codecs
+ * Prioritize H.264 first (100% hardware-supported on iOS 17 Safari, macOS, Windows, Android)
+ * followed by VP9. This prevents codec negotiation failure on Safari iOS.
  */
 export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
   if (!("setCodecPreferences" in transceiver)) return;
@@ -188,7 +215,8 @@ export const prioritizeVideoCodecs = (transceiver: RTCRtpTransceiver) => {
     const capabilities = RTCRtpReceiver.getCapabilities("video");
     if (!capabilities || !capabilities.codecs) return;
 
-    const preferredCodecs = ["video/VP9", "video/H264"];
+    // H.264 is universally supported on iOS 17 Safari, then VP9 for Chromium
+    const preferredCodecs = ["video/H264", "video/VP9"];
     const sorted = [...capabilities.codecs].sort((a, b) => {
       const aIndex = preferredCodecs.indexOf(a.mimeType);
       const bIndex = preferredCodecs.indexOf(b.mimeType);

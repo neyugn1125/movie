@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { StreamStats } from "@/types/cinema";
 import {
   Maximize,
@@ -10,6 +10,7 @@ import {
   Monitor,
   Info,
   Tv,
+  Play,
 } from "lucide-react";
 
 interface CinemaStageProps {
@@ -37,19 +38,40 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
   const [showStats, setShowStats] = useState(true);
+  const [isPlayBlocked, setIsPlayBlocked] = useState(false);
 
   // Active stream is either remote (if partner is sharing) or local (if I am sharing)
   const activeStream = remoteStream || (isSharingScreen ? localStream : null);
+
+  const handleManualPlay = useCallback(() => {
+    if (videoRef.current) {
+      videoRef.current
+        .play()
+        .then(() => {
+          setIsPlayBlocked(false);
+        })
+        .catch((err) => {
+          console.warn("Manual video play attempt error:", err);
+        });
+    }
+  }, []);
 
   useEffect(() => {
     if (videoRef.current) {
       if (activeStream) {
         videoRef.current.srcObject = activeStream;
-        videoRef.current.play().catch((err) => {
-          console.warn("Video auto-play interrupted:", err);
-        });
+        videoRef.current
+          .play()
+          .then(() => {
+            setIsPlayBlocked(false);
+          })
+          .catch((err) => {
+            console.warn("Video auto-play restricted by Safari/iOS (User gesture required):", err);
+            setIsPlayBlocked(true);
+          });
       } else {
         videoRef.current.srcObject = null;
+        setIsPlayBlocked(false);
       }
     }
   }, [activeStream]);
@@ -98,7 +120,7 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
         } else if (doc.documentElement?.webkitRequestFullscreen) {
           doc.documentElement.webkitRequestFullscreen();
         } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
-          // iOS Safari on iPhone
+          // iOS Safari on iPhone fallback
           (videoRef.current as any).webkitEnterFullscreen();
         }
       } else {
@@ -189,7 +211,8 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             ref={videoRef}
             autoPlay
             playsInline
-            muted={true} // Film audio is managed by Web Audio API for volume control & ducking
+            muted={true}
+            onClick={handleManualPlay}
             onDoubleClick={toggleFullscreen}
             className={`w-full h-full transition-all duration-200 select-none ${
               isFullscreen
@@ -205,6 +228,24 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
                 : "object-fill"
             }`}
           />
+
+          {/* iOS Safari Tap-to-Play Overlay */}
+          {isPlayBlocked && (
+            <div
+              onClick={handleManualPlay}
+              className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/75 backdrop-blur-sm cursor-pointer p-4 text-center animate-fade-in"
+            >
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-theme-primary/90 text-white flex items-center justify-center shadow-glow mb-3 animate-pulse">
+                <Play className="w-8 h-8 sm:w-10 sm:h-10 ml-1 fill-white" />
+              </div>
+              <p className="text-sm sm:text-base font-bold text-white tracking-wide">
+                Chạm để bắt đầu xem phim
+              </p>
+              <p className="text-xs text-slate-300 mt-1">
+                {isPartnerSharing ? `${partnerName} đang phát trực tiếp` : "Đang phát màn hình"}
+              </p>
+            </div>
+          )}
 
           {/* Current Stream Label Badge */}
           <div className="absolute top-3 sm:top-6 left-3 sm:left-6 z-20 flex items-center gap-2">
@@ -256,78 +297,84 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
             </div>
           )}
 
-          {/* Quick On-Screen Video Toolbar */}
-          <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1 sm:gap-2 bg-black/75 backdrop-blur-md border border-white/10 rounded-xl p-1 sm:p-1.5 opacity-70 hover:opacity-100 transition-opacity">
+          {/* Floating On-Screen Quick Bar */}
+          <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 z-20 flex items-center gap-1.5 sm:gap-2 bg-black/60 backdrop-blur-md border border-white/10 p-1 sm:p-1.5 rounded-xl shadow-lg">
+            {/* Stats Toggle */}
             <button
               onClick={() => setShowStats(!showStats)}
-              title="Bật/Tắt bảng thông số"
-              className={`p-1.5 rounded-lg text-xs transition-colors ${
+              title={showStats ? "Ẩn thông số kỹ thuật" : "Hiện thông số kỹ thuật"}
+              className={`p-1.5 sm:p-2 rounded-lg text-xs transition-colors ${
                 showStats ? "text-theme-accent bg-white/10" : "text-slate-400 hover:text-white"
               }`}
             >
-              <Activity className="w-4 h-4" />
+              <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
+
+            {/* Fit Mode Toggle */}
             <button
               onClick={cycleFitMode}
-              title={`Tỉ lệ hiển thị: ${
+              title={`Chế độ khung hình: ${
                 fitMode === "contain"
-                  ? "Vừa vặn (Gốc)"
+                  ? "Tỉ lệ gốc (Chứa đầy)"
                   : fitMode === "cover"
-                  ? "Tràn màn hình (Cover)"
-                  : "Kéo giãn (Fill)"
+                  ? "Cắt viền (Tràn màn hình)"
+                  : "Kéo giãn"
               }`}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 text-xs transition-colors flex items-center gap-1"
+              className="p-1.5 sm:p-2 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1"
             >
-              <Tv className="w-4 h-4" />
-              <span className="text-[10px] uppercase font-mono hidden sm:inline">{fitMode}</span>
+              <Tv className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline capitalize text-[10px]">{fitMode}</span>
             </button>
+
+            {/* PiP Button (Desktop / Supported browsers) */}
             <button
               onClick={togglePiP}
-              title="Chế độ thu nhỏ (Picture-in-Picture)"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 text-xs transition-colors"
+              title="Hình trong hình (Picture in Picture)"
+              className="p-1.5 sm:p-2 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
             >
-              <PictureInPicture2 className="w-4 h-4" />
+              <PictureInPicture2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
+
+            {/* Fullscreen Button */}
             <button
               onClick={toggleFullscreen}
-              title={isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình thực tế"}
-              className={`p-1.5 rounded-lg text-xs transition-colors ${
-                isFullscreen
-                  ? "bg-theme-primary text-white"
-                  : "text-slate-400 hover:text-white hover:bg-white/10"
-              }`}
+              title={isFullscreen ? "Thu nhỏ (ESC)" : "Toàn màn hình"}
+              className="p-1.5 sm:p-2 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
             >
-              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              {isFullscreen ? (
+                <Minimize className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              ) : (
+                <Maximize className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              )}
             </button>
           </div>
         </div>
       ) : (
-        /* Standby Cinema Stage */
-        <div className="flex flex-col items-center justify-center p-8 max-w-lg text-center z-10 animate-fade-in">
-          <div className="w-20 h-20 rounded-3xl bg-theme-primary/10 border border-theme-border/30 flex items-center justify-center text-theme-primary mb-6 shadow-glow">
-            <Monitor className="w-10 h-10" />
+        /* Empty / Waiting Stage */
+        <div className="flex flex-col items-center justify-center p-6 text-center max-w-md animate-fade-in">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-theme-surface/50 border border-theme-border/40 flex items-center justify-center text-theme-primary mb-6 shadow-glow">
+            <Monitor className="w-10 h-10 sm:w-12 sm:h-12" />
           </div>
-          <h2 className="text-xl font-bold text-white mb-2 tracking-tight">
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white mb-2">
             Màn Chiếu Đang Chờ Phim
           </h2>
-          <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-            Bạn hoặc {partnerName} có thể bấm nút{" "}
-            <span className="text-theme-accent font-semibold">"Bắt đầu chia sẻ màn hình"</span> ở
-            thanh điều khiển bên dưới để bắt đầu chiếu phim.
+          <p className="text-xs sm:text-sm text-slate-400 mb-6 leading-relaxed">
+            Bạn hoặc {partnerName} có thể bấm nút &quot;Chiếu Phim&quot; ở thanh điều khiển bên dưới để bắt đầu chia sẻ phim.
           </p>
 
-          {/* DRM / Anti-Black Screen Tip Box */}
-          <div className="w-full p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-left text-xs text-slate-300 space-y-2 backdrop-blur-md">
-            <div className="flex items-center gap-2 text-theme-accent font-medium">
-              <Info className="w-4 h-4 flex-shrink-0" />
-              <span>Mẹo chia sẻ âm thanh Stereo & chống đen màn hình:</span>
+          <div className="p-3 sm:p-4 rounded-xl bg-white/5 border border-white/10 text-left text-[11px] sm:text-xs text-slate-300 space-y-2">
+            <div className="flex items-center gap-1.5 font-semibold text-theme-accent">
+              <Info className="w-3.5 h-3.5" /> Mẹo xem phim mượt mà và âm thanh chuẩn:
             </div>
-            <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-400 pl-1 leading-relaxed">
+            <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
               <li>
-                Sử dụng trình duyệt <strong>Chrome / Edge</strong> và chọn <strong>"Chia sẻ thẻ (Share Tab)"</strong> để lấy âm thanh gốc chuẩn Stereo của phim.
+                Khuyến khích dùng máy tính phát qua Chrome / Edge và chọn <strong>Chia sẻ thẻ (Share Tab)</strong> để lấy âm thanh gốc chuẩn Stereo.
               </li>
               <li>
-                Nếu xem trên Netflix/Apple TV bị đen màn hình, hãy tắt <em>"Hardware Acceleration"</em> (Sử dụng tính năng tăng tốc đồ họa phần cứng) trong cài đặt trình duyệt.
+                Điện thoại iPhone Safari có thể vào rạp xem mượt mà với chuẩn nén hình ảnh H.264 tối ưu pin.
+              </li>
+              <li>
+                Nếu xem trên Netflix/Apple TV bị đen màn hình, hãy tắt tính năng &quot;Hardware Acceleration&quot; trong cài đặt trình duyệt.
               </li>
             </ul>
           </div>

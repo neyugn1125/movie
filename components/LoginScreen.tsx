@@ -102,14 +102,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             Vào rạp chiếu phim
           </button>
         </form>
-
-        {/* Footnote hint */}
-        <div className="mt-6 text-center">
-          <p className="text-[11px] text-slate-500">
-            Giao diện sẽ tự động đổi sang màu <span className="text-sky-400 font-medium">Xanh Da Trời</span> (Nguyen) hoặc{" "}
-            <span className="text-pink-400 font-medium">Hồng Phấn</span> (Crabie) theo mật khẩu.
-          </p>
-        </div>
       </div>
     </div>
   );

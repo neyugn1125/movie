@@ -30,7 +30,8 @@ export type DataChannelMessage =
   | { type: "chat"; payload: ChatMessage }
   | { type: "reaction"; payload: { emoji: string; sender: UserRole } }
   | { type: "heartbeat"; payload: { sender: UserRole; isSharing: boolean } }
-  | { type: "stream-state"; payload: { isSharing: boolean } };
+  | { type: "stream-state"; payload: { isSharing: boolean } }
+  | { type: "stream-request" };
 
 export interface CinemaTheme {
   name: UserRole;

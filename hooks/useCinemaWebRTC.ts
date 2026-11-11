@@ -56,7 +56,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   const peerRef = useRef<any>(null);
   const dataConnRef = useRef<DataConnection | null>(null);
   const screenCallRef = useRef<MediaConnection | null>(null);
-  const voiceCallRef = useRef<MediaConnection | null>(null);
+  const outgoingVoiceCallRef = useRef<MediaConnection | null>(null);
+  const incomingVoiceCallRef = useRef<MediaConnection | null>(null);
   const activePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
 
   const currentMyPeerIdRef = useRef<string>(getPeerIdForRole(myRole));
@@ -64,10 +65,15 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
   const localMicStreamRef = useRef<MediaStream | null>(null);
   const localScreenStreamRef = useRef<MediaStream | null>(null);
+  const remoteScreenStreamRef = useRef<MediaStream | null>(null);
   const isSharingScreenRef = useRef<boolean>(false);
+  const isPartnerSharingRef = useRef<boolean>(false);
   const isConnectingRef = useRef<boolean>(false);
 
-  // Stats calculation refs
+  const bitrateRef = useRef<BitrateTier>(15);
+  const degradationRef = useRef<DegradationPreference>("maintain-framerate");
+
+  // Stats & Deduplication refs
   const prevBytesRef = useRef<number>(0);
   const prevTimestampRef = useRef<number>(0);
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -75,6 +81,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   const lastHeartbeatReceivedRef = useRef<number>(0);
   const lastScreenCallTimestampRef = useRef<number>(0);
   const needsStreamRequestRef = useRef<boolean>(false);
+  const processedReactionIdsRef = useRef<Set<string>>(new Set());
 
   // Sync state to refs
   useEffect(() => {
@@ -86,44 +93,75 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   }, [localScreenStream]);
 
   useEffect(() => {
+    remoteScreenStreamRef.current = remoteScreenStream;
+  }, [remoteScreenStream]);
+
+  useEffect(() => {
     isSharingScreenRef.current = isSharingScreen;
   }, [isSharingScreen]);
 
-  // Trigger floating reaction locally
-  const addReactionAnimation = useCallback((emoji: string, sender: UserRole) => {
-    const newReaction: FloatingReaction = {
-      id: `${Date.now()}-${Math.random()}`,
-      emoji,
-      sender,
-      xPercent: Math.floor(Math.random() * 70) + 15,
-    };
-    setReactions((prev) => [...prev, newReaction]);
+  useEffect(() => {
+    isPartnerSharingRef.current = isPartnerSharing;
+  }, [isPartnerSharing]);
 
-    setTimeout(() => {
-      setReactions((prev) => prev.filter((r) => r.id !== newReaction.id));
-    }, 2600);
-  }, []);
+  useEffect(() => {
+    bitrateRef.current = bitrate;
+    degradationRef.current = degradation;
+
+    // Dynamically update active video sender if already sharing
+    const pc = activePeerConnectionRef.current;
+    if (pc && isSharingScreenRef.current) {
+      const transceivers = pc.getTransceivers?.() || [];
+      const videoTransceiver = transceivers.find(
+        (t: RTCRtpTransceiver) => t.sender?.track?.kind === "video"
+      );
+      if (videoTransceiver) {
+        configureVideoSender(videoTransceiver.sender, bitrate, degradation);
+      }
+    }
+  }, [bitrate, degradation]);
+
+  // Trigger floating reaction locally with deduplication
+  const addReactionAnimation = useCallback(
+    (emoji: string, sender: UserRole, customId?: string) => {
+      const reactionId = customId || `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      if (processedReactionIdsRef.current.has(reactionId)) return;
+      processedReactionIdsRef.current.add(reactionId);
+
+      const newReaction: FloatingReaction = {
+        id: reactionId,
+        emoji,
+        sender,
+        xPercent: Math.floor(Math.random() * 70) + 15,
+      };
+      setReactions((prev) => [...prev, newReaction]);
+
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== reactionId));
+      }, 2600);
+    },
+    []
+  );
 
   // Call partner with current screen stream if sharing
   const callPartnerWithScreenStream = useCallback(
-    (targetPeerId?: string) => {
+    (targetPeerId?: string, forceCall: boolean = false) => {
       const peer = peerRef.current;
       const stream = localScreenStreamRef.current;
-      if (!peer || !stream) return;
+      if (!peer || peer.destroyed || !stream) return;
 
       const now = Date.now();
-      // Debounce: prevent rapid re-calling which resets ICE negotiation before connection establishes
-      if (now - lastScreenCallTimestampRef.current < 6000) {
-        console.log("[WebRTC] Call skipped: 6s debounce active to let WebRTC ICE establish");
+      if (!forceCall && now - lastScreenCallTimestampRef.current < 4500) {
+        console.log("[WebRTC] Call skipped: debounce active to let WebRTC ICE establish");
         return;
       }
       lastScreenCallTimestampRef.current = now;
 
-      const destId = targetPeerId || partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole);
+      const destId =
+        targetPeerId || partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole);
       console.log(`[WebRTC] Initiating video screen call to: ${destId}`);
 
       try {
-        // Clean up any stale prior screen call before initiating a fresh one
         if (screenCallRef.current) {
           try {
             screenCallRef.current.close();
@@ -133,34 +171,43 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           screenCallRef.current = null;
         }
 
+        const currentBitrate = bitrateRef.current;
+        const currentDegradation = degradationRef.current;
+
         const call = peer.call(destId, stream, {
           metadata: { type: "screen", role: myRole },
         });
+
+        if (!call) return;
 
         screenCallRef.current = call;
         activePeerConnectionRef.current = call.peerConnection;
 
         if (call.peerConnection) {
-          patchPeerConnectionForBitrate(call.peerConnection, bitrate);
+          patchPeerConnectionForBitrate(call.peerConnection, currentBitrate);
         }
 
         const applyOptimizations = async () => {
           const pc = call.peerConnection;
-          if (pc) {
+          if (pc && pc.getTransceivers) {
             const transceivers = pc.getTransceivers();
             const videoTransceiver = transceivers.find(
-              (t: RTCRtpTransceiver) => t.sender.track?.kind === "video"
+              (t: RTCRtpTransceiver) => t.sender?.track?.kind === "video"
             );
             if (videoTransceiver) {
               prioritizeVideoCodecs(videoTransceiver);
-              await configureVideoSender(videoTransceiver.sender, bitrate, degradation);
+              await configureVideoSender(
+                videoTransceiver.sender,
+                bitrateRef.current,
+                degradationRef.current
+              );
             }
           }
         };
 
         applyOptimizations();
         setTimeout(applyOptimizations, 800);
-        setTimeout(applyOptimizations, 3000);
+        setTimeout(applyOptimizations, 2500);
 
         call.on("close", () => {
           if (screenCallRef.current === call) {
@@ -171,7 +218,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         console.warn("[WebRTC] Error calling partner with screen:", err);
       }
     },
-    [bitrate, degradation, myRole, partnerRole]
+    [myRole, partnerRole]
   );
 
   // Handle incoming data channel messages
@@ -187,25 +234,25 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
       } else if (msg.type === "heartbeat") {
         lastHeartbeatReceivedRef.current = Date.now();
         setIsPartnerConnected(true);
-        if (msg.payload.isSharing !== isPartnerSharing) {
+        if (msg.payload.isSharing !== isPartnerSharingRef.current) {
           setIsPartnerSharing(msg.payload.isSharing);
         }
       } else if (msg.type === "stream-state") {
         setIsPartnerSharing(msg.payload.isSharing);
         if (!msg.payload.isSharing) {
           setRemoteScreenStream(null);
-        } else if (!remoteScreenStream) {
+        } else if (!remoteScreenStreamRef.current) {
           if (dataConnRef.current && dataConnRef.current.open) {
             dataConnRef.current.send(JSON.stringify({ type: "stream-request" }));
           }
         }
       } else if (msg.type === "stream-request") {
         if (localScreenStreamRef.current) {
-          callPartnerWithScreenStream();
+          callPartnerWithScreenStream(undefined, true);
         }
       }
     },
-    [addReactionAnimation, callPartnerWithScreenStream, isPartnerSharing, remoteScreenStream]
+    [addReactionAnimation, callPartnerWithScreenStream]
   );
 
   // Setup data connection handlers
@@ -216,6 +263,9 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         dataConnRef.current = conn;
         partnerActualPeerIdRef.current = conn.peer;
         setIsPartnerConnected(true);
+        setConnectionStatusText(
+          `Đã kết nối với ${partnerRole === "nguyen" ? "Nguyen" : "Crabie"}`
+        );
         isConnectingRef.current = false;
         lastHeartbeatReceivedRef.current = Date.now();
 
@@ -231,17 +281,19 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         }
 
         if (localScreenStreamRef.current && peerRef.current) {
-          callPartnerWithScreenStream(conn.peer);
+          callPartnerWithScreenStream(conn.peer, true);
         }
 
         if (localMicStreamRef.current && peerRef.current) {
           const call = peerRef.current.call(conn.peer, localMicStreamRef.current, {
             metadata: { type: "voice", role: myRole },
           });
-          voiceCallRef.current = call;
-          call.on("stream", (remoteStream: MediaStream) => {
-            setRemoteVoiceStream(remoteStream);
-          });
+          if (call) {
+            outgoingVoiceCallRef.current = call;
+            call.on("stream", (remoteStream: MediaStream) => {
+              setRemoteVoiceStream(remoteStream);
+            });
+          }
         }
       };
 
@@ -273,19 +325,21 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         isConnectingRef.current = false;
       });
     },
-    [callPartnerWithScreenStream, handleDataMessage, myRole]
+    [callPartnerWithScreenStream, handleDataMessage, myRole, partnerRole]
   );
 
   // Connect to partner safely
   const connectToPartner = useCallback(
     (overrideTargetId?: string) => {
       const peer = peerRef.current;
-      if (!peer || peer.destroyed) return;
+      if (!peer || peer.destroyed || peer.disconnected) return;
       if (dataConnRef.current && dataConnRef.current.open) return;
       if (isConnectingRef.current) return;
 
       const targetPeerId =
         overrideTargetId || partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole);
+
+      if (!targetPeerId || targetPeerId === currentMyPeerIdRef.current) return;
 
       isConnectingRef.current = true;
       console.log(`[WebRTC] Connecting to partner: ${targetPeerId}`);
@@ -294,11 +348,13 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         const conn = peer.connect(targetPeerId, {
           reliable: true,
         });
-        setupDataConnection(conn);
+        if (conn) {
+          setupDataConnection(conn);
+        }
 
         setTimeout(() => {
           isConnectingRef.current = false;
-        }, 3500);
+        }, 3000);
       } catch (err) {
         console.warn("[WebRTC] Connect attempt error:", err);
         isConnectingRef.current = false;
@@ -307,8 +363,27 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     [partnerRole, setupDataConnection]
   );
 
-  // Main Peer Lifecycle (Runs ONCE per myRole mount)
+  // Keep latest callbacks in refs so main Peer useEffect NEVER re-runs and destroys Peer
+  const callPartnerRef = useRef(callPartnerWithScreenStream);
+  const connectToPartnerRef = useRef(connectToPartner);
+  const setupDataConnectionRef = useRef(setupDataConnection);
+  const addReactionAnimationRef = useRef(addReactionAnimation);
+
   useEffect(() => {
+    callPartnerRef.current = callPartnerWithScreenStream;
+    connectToPartnerRef.current = connectToPartner;
+    setupDataConnectionRef.current = setupDataConnection;
+    addReactionAnimationRef.current = addReactionAnimation;
+  }, [
+    callPartnerWithScreenStream,
+    connectToPartner,
+    setupDataConnection,
+    addReactionAnimation,
+  ]);
+
+  // Main Peer Lifecycle — Runs STRICTLY ONCE per role mount
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let peerInstance: any = null;
     let isDisposed = false;
 
@@ -338,7 +413,10 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           setIsPeerReady(true);
           setConnectionStatusText("Đang chờ đối phương vào rạp...");
 
-          // Announce online peer ID to serverless hub
+          // 1. Immediately try connecting to default partner fixed ID
+          connectToPartnerRef.current(getPeerIdForRole(partnerRole));
+
+          // 2. Also announce online peer ID to serverless hub
           fetch("/api/cinema-signal", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -352,7 +430,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             .then((data) => {
               if (data?.partner?.peerId) {
                 partnerActualPeerIdRef.current = data.partner.peerId;
-                connectToPartner(data.partner.peerId);
+                connectToPartnerRef.current(data.partner.peerId);
               }
             })
             .catch(() => {});
@@ -362,7 +440,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         peerInstance.on("connection", (conn: DataConnection) => {
           if (isDisposed) return;
           console.log("[WebRTC] Received incoming DataConnection from:", conn.peer);
-          setupDataConnection(conn);
+          setupDataConnectionRef.current(conn);
         });
 
         // Incoming Call (Screen or Voice)
@@ -380,12 +458,11 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             screenCallRef.current = call;
             activePeerConnectionRef.current = call.peerConnection;
 
-            // Direct native RTCPeerConnection track event (essential fallback for iOS 17 Safari & Multi-track)
             const pc = call.peerConnection;
             if (pc && pc.addEventListener) {
               const composedStream = new MediaStream();
               pc.addEventListener("track", (event: RTCTrackEvent) => {
-                console.log("[WebRTC] Native track event received:", event.track.kind, event.streams);
+                console.log("[WebRTC] Native track event received:", event.track.kind);
                 composedStream.addTrack(event.track);
 
                 const tracksToUse =
@@ -393,13 +470,11 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
                     ? event.streams[0].getTracks()
                     : composedStream.getTracks();
 
-                // Always instantiate a new MediaStream so React state detects update and re-binds video element
                 setRemoteScreenStream(new MediaStream(tracksToUse));
                 setIsPartnerSharing(true);
               });
             }
 
-            // Note: Never mutate Answer SDP on receiver side to maintain iOS WebKit compatibility
             call.answer();
 
             call.on("stream", (incomingStream: MediaStream) => {
@@ -416,34 +491,37 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
               }
             });
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             call.on("error", (err: any) => {
               console.warn("[WebRTC] Remote screen call error:", err);
             });
           } else {
-            voiceCallRef.current = call;
+            incomingVoiceCallRef.current = call;
             call.answer(localMicStreamRef.current || undefined);
 
             call.on("stream", (incomingVoiceStream: MediaStream) => {
               console.log("[WebRTC] Received remote voice stream!");
-              setRemoteVoiceStream(incomingVoiceStream);
+              setRemoteVoiceStream(new MediaStream(incomingVoiceStream.getTracks()));
             });
 
             call.on("close", () => {
               setRemoteVoiceStream(null);
-              voiceCallRef.current = null;
+              if (incomingVoiceCallRef.current === call) {
+                incomingVoiceCallRef.current = null;
+              }
             });
           }
         });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         peerInstance.on("error", (err: any) => {
           if (err.type === "peer-unavailable") {
-            console.log("[WebRTC] Partner not online yet");
+            isConnectingRef.current = false;
           } else if (err.type === "unavailable-id") {
             console.warn(`[WebRTC] Peer ID "${targetId}" in use. Auto-generating fresh unique ID...`);
             if (peerInstance && !peerInstance.destroyed) {
               peerInstance.destroy();
             }
-            // Auto fallback to unique ID so it connects instantly 100% without getting stuck
             const uniqueId = `nc-${myRole}-${Math.random().toString(36).substring(2, 8)}`;
             currentMyPeerIdRef.current = uniqueId;
             setTimeout(() => {
@@ -453,11 +531,12 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             }, 600);
           } else {
             console.warn("[WebRTC] Peer error:", err);
+            isConnectingRef.current = false;
           }
         });
 
         peerInstance.on("disconnected", () => {
-          console.log("[WebRTC] Peer disconnected from server. Reconnecting...");
+          console.log("[WebRTC] Peer disconnected from signaling server. Reconnecting...");
           if (!isDisposed && peerInstance && !peerInstance.destroyed) {
             peerInstance.reconnect();
           }
@@ -476,21 +555,19 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     };
     window.addEventListener("beforeunload", handleUnload);
 
-    // Reconnect on iOS Safari when switching tabs or unlocking phone
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        console.log("[WebRTC] App resumed to foreground on iOS/Mobile");
         if (peerInstance && peerInstance.disconnected && !peerInstance.destroyed) {
           peerInstance.reconnect();
         }
         if (partnerActualPeerIdRef.current) {
-          connectToPartner(partnerActualPeerIdRef.current);
+          connectToPartnerRef.current(partnerActualPeerIdRef.current);
         }
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    // Continuous Dual-Sync Loop every 1.8s (Syncs presence, chat & triggers WebRTC handshake)
+    // Continuous Dual-Sync Loop every 1.8s
     syncIntervalRef.current = setInterval(async () => {
       if (isDisposed) return;
 
@@ -506,9 +583,12 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         } catch (e) {
           console.warn("Heartbeat send error:", e);
         }
+      } else {
+        // Fallback: If DataChannel is not open, attempt connecting to default fixed ID
+        connectToPartnerRef.current(partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole));
       }
 
-      // 2. Serverless Signal Hub Sync (Ensures 100% presence & message receipt across 4G & WiFi)
+      // 2. Serverless Signal Hub Sync
       try {
         const shouldRequestScreen = needsStreamRequestRef.current;
         needsStreamRequestRef.current = false;
@@ -535,37 +615,40 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
           if (pOnline) {
             setIsPartnerConnected(true);
-            setConnectionStatusText(`Đã kết nối với ${partnerRole === "nguyen" ? "Nguyen" : "Crabie"}`);
+            setConnectionStatusText(
+              `Đã kết nối với ${partnerRole === "nguyen" ? "Nguyen" : "Crabie"}`
+            );
 
             if (pPeerId && pPeerId !== partnerActualPeerIdRef.current) {
               partnerActualPeerIdRef.current = pPeerId;
             }
 
-            // If not connected via P2P DataChannel yet, initiate WebRTC connection
             if (!dataConnRef.current || !dataConnRef.current.open) {
               if (pPeerId) {
-                connectToPartner(pPeerId);
+                connectToPartnerRef.current(pPeerId);
               }
             }
 
-            // Sync partner sharing status
-            if (pSharing !== isPartnerSharing) {
+            if (pSharing !== isPartnerSharingRef.current) {
               setIsPartnerSharing(pSharing);
             }
 
-            // If we are sharing and partner is online, call when requested or upon first connect
             if (isSharingScreenRef.current && localScreenStreamRef.current && pPeerId) {
               if (pRequestedScreen) {
-                console.log(`[WebRTC] Partner requested screen stream. Calling: ${pPeerId}`);
-                callPartnerWithScreenStream(pPeerId);
+                callPartnerRef.current(pPeerId, true);
               } else if (!screenCallRef.current) {
-                callPartnerWithScreenStream(pPeerId);
+                callPartnerRef.current(pPeerId, false);
               }
             }
           } else {
             if (!dataConnRef.current?.open) {
-              setIsPartnerConnected(false);
-              setConnectionStatusText(`Đang chờ ${partnerRole === "nguyen" ? "Nguyen" : "Crabie"} vào rạp...`);
+              const timeSinceLastHb = Date.now() - lastHeartbeatReceivedRef.current;
+              if (timeSinceLastHb > 10000) {
+                setIsPartnerConnected(false);
+                setConnectionStatusText(
+                  `Đang chờ ${partnerRole === "nguyen" ? "Nguyen" : "Crabie"} vào rạp...`
+                );
+              }
             }
           }
         }
@@ -577,6 +660,15 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             prev.forEach((m) => map.set(m.id, m));
             data.messages.forEach((m: ChatMessage) => map.set(m.id, m));
             return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
+          });
+        }
+
+        // Sync recent reactions from serverless hub
+        if (data?.recentReactions && Array.isArray(data.recentReactions)) {
+          data.recentReactions.forEach((r: FloatingReaction) => {
+            if (r.sender !== myRole) {
+              addReactionAnimationRef.current(r.emoji, r.sender, r.id);
+            }
           });
         }
       } catch (err) {
@@ -595,11 +687,12 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
       peerRef.current = null;
       dataConnRef.current = null;
       screenCallRef.current = null;
-      voiceCallRef.current = null;
+      outgoingVoiceCallRef.current = null;
+      incomingVoiceCallRef.current = null;
       setIsPeerReady(false);
       setIsPartnerConnected(false);
     };
-  }, [callPartnerWithScreenStream, connectToPartner, isPartnerSharing, myRole, partnerRole, remoteScreenStream, setupDataConnection]);
+  }, [myRole, partnerRole]);
 
   // Realtime Stats monitoring
   useEffect(() => {
@@ -659,8 +752,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
         setStats({
           resolution: resStr,
-          fps: currentFps || 60,
-          bitrateMbps: calculatedBitrate || bitrate,
+          fps: Math.round(currentFps) || 60,
+          bitrateMbps: calculatedBitrate || bitrateRef.current,
           pingMs: currentRtt || 12,
           codec: currentCodec,
         });
@@ -672,13 +765,13 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     return () => {
       if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
     };
-  }, [bitrate]);
+  }, []);
 
   // Start Screen Sharing with Multi-Tier Fallback
   const startScreenShare = useCallback(
     async (
-      targetBitrate: BitrateTier = bitrate,
-      targetDegradation: DegradationPreference = degradation
+      targetBitrate: BitrateTier = bitrateRef.current,
+      targetDegradation: DegradationPreference = degradationRef.current
     ) => {
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
         alert(
@@ -686,6 +779,12 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         );
         return;
       }
+
+      // Save chosen bitrate & degradation preference immediately
+      setBitrate(targetBitrate);
+      setDegradation(targetDegradation);
+      bitrateRef.current = targetBitrate;
+      degradationRef.current = targetDegradation;
 
       let stream: MediaStream | null = null;
 
@@ -709,7 +808,6 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         stream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
       } catch (err: any) {
         if (err.name === "NotAllowedError" || err.name === "AbortError") {
-          console.log("User dismissed screen share picker");
           return;
         }
 
@@ -745,8 +843,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
       setIsSharingScreen(true);
       isSharingScreenRef.current = true;
 
-      // Broadcast screen call to partner
-      callPartnerWithScreenStream();
+      // Broadcast screen call to partner immediately
+      callPartnerWithScreenStream(undefined, true);
 
       // Notify partner via data channel & serverless hub
       if (dataConnRef.current && dataConnRef.current.open) {
@@ -772,7 +870,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         stopScreenShare();
       };
     },
-    [bitrate, callPartnerWithScreenStream, degradation, myRole]
+    [callPartnerWithScreenStream, myRole]
   );
 
   // Stop Screen Sharing
@@ -829,16 +927,18 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         localMicStreamRef.current = stream;
         setIsMicMuted(false);
 
-        if (peerRef.current) {
-          const targetPeerId = partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole);
+        if (peerRef.current && !peerRef.current.destroyed) {
+          const targetPeerId =
+            partnerActualPeerIdRef.current || getPeerIdForRole(partnerRole);
           const call = peerRef.current.call(targetPeerId, stream, {
             metadata: { type: "voice", role: myRole },
           });
-          voiceCallRef.current = call;
-
-          call.on("stream", (remoteStream: MediaStream) => {
-            setRemoteVoiceStream(remoteStream);
-          });
+          if (call) {
+            outgoingVoiceCallRef.current = call;
+            call.on("stream", (remoteStream: MediaStream) => {
+              setRemoteVoiceStream(new MediaStream(remoteStream.getTracks()));
+            });
+          }
         }
       } catch (err) {
         console.warn("Mic access error:", err);
@@ -853,7 +953,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     }
   }, [myRole, partnerRole]);
 
-  // Send Chat message (dual: WebRTC DataChannel + Serverless Signal Hub)
+  // Send Chat message
   const sendChatMessage = useCallback(
     (text: string) => {
       if (!text.trim()) return;
@@ -867,7 +967,6 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
 
       setChatMessages((prev) => [...prev, newMsg]);
 
-      // 1. Try instant WebRTC DataChannel
       if (dataConnRef.current && dataConnRef.current.open) {
         dataConnRef.current.send(
           JSON.stringify({
@@ -877,7 +976,6 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         );
       }
 
-      // 2. Always sync via serverless hub (guarantees delivery across 4G & WiFi)
       fetch("/api/cinema-signal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -894,11 +992,11 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
     [myRole]
   );
 
-  // Send Floating Reaction (dual: WebRTC + Serverless Hub)
+  // Send Floating Reaction
   const sendReaction = useCallback(
     (emoji: string) => {
       const reactionId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      addReactionAnimation(emoji, myRole);
+      addReactionAnimation(emoji, myRole, reactionId);
 
       if (dataConnRef.current && dataConnRef.current.open) {
         dataConnRef.current.send(
@@ -926,14 +1024,22 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   // Force Reconnect
   const reconnect = useCallback(() => {
     if (dataConnRef.current) {
-      dataConnRef.current.close();
+      try {
+        dataConnRef.current.close();
+      } catch (e) {}
       dataConnRef.current = null;
     }
     isConnectingRef.current = false;
+    if (peerRef.current && peerRef.current.disconnected && !peerRef.current.destroyed) {
+      peerRef.current.reconnect();
+    }
     connectToPartner();
-  }, [connectToPartner]);
+    if (localScreenStreamRef.current) {
+      callPartnerWithScreenStream(undefined, true);
+    }
+  }, [callPartnerWithScreenStream, connectToPartner]);
 
-  // Manually Request Screen Stream (dual: DataChannel + Signal Hub)
+  // Manually Request Screen Stream
   const requestScreenStream = useCallback(() => {
     console.log("[WebRTC] Manually requesting screen stream from partner...");
     needsStreamRequestRef.current = true;
@@ -943,6 +1049,8 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
       } catch (e) {
         console.warn("DataChannel send stream-request error:", e);
       }
+    } else {
+      connectToPartner();
     }
     fetch("/api/cinema-signal", {
       method: "POST",
@@ -954,7 +1062,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
         requestScreen: true,
       }),
     }).catch(() => {});
-  }, [myRole]);
+  }, [connectToPartner, myRole]);
 
   return {
     isPeerReady,

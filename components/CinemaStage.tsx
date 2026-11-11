@@ -53,15 +53,15 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
 
   const handleManualPlay = useCallback(() => {
     if (videoRef.current) {
-      videoRef.current.muted = false;
-      setIsVideoMuted(false);
+      // Never unmute local screen preview to prevent self-echo on sender's PC
+      const shouldMuteElement = !remoteStream;
+      videoRef.current.muted = shouldMuteElement ? true : isVideoMuted;
       videoRef.current
         .play()
         .then(() => {
           setIsPlayBlocked(false);
         })
-        .catch((err) => {
-          console.warn("Manual unmuted video play attempt restricted by browser:", err);
+        .catch(() => {
           if (videoRef.current) {
             videoRef.current.muted = true;
             setIsVideoMuted(true);
@@ -72,15 +72,23 @@ export const CinemaStage: React.FC<CinemaStageProps> = ({
           }
         });
     }
-  }, []);
+  }, [remoteStream, isVideoMuted]);
 
   const toggleVideoAudio = useCallback(() => {
+    if (!remoteStream) {
+      // Sender is previewing their own screen: keep muted to avoid echo
+      if (videoRef.current) {
+        videoRef.current.muted = true;
+      }
+      setIsVideoMuted(true);
+      return;
+    }
     if (videoRef.current) {
       const nextMuted = !videoRef.current.muted;
       videoRef.current.muted = nextMuted;
       setIsVideoMuted(nextMuted);
     }
-  }, []);
+  }, [remoteStream]);
 
   const handleRefreshVideo = useCallback(() => {
     if (videoRef.current && activeStream) {

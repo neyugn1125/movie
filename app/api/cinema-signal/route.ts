@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ChatMessage, FloatingReaction } from "@/types/cinema";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 interface RoleSignal {
   peerId: string;
   isSharing: boolean;
@@ -8,10 +11,25 @@ interface RoleSignal {
   lastSeen: number;
 }
 
-// In-memory room state on Vercel Serverless container
-const roomSignals: Record<string, RoleSignal> = {};
-const roomMessages: ChatMessage[] = [];
-const roomReactions: FloatingReaction[] = [];
+interface GlobalCinemaState {
+  roomSignals: Record<string, RoleSignal>;
+  roomMessages: ChatMessage[];
+  roomReactions: FloatingReaction[];
+}
+
+const globalForCinema = globalThis as unknown as {
+  cinemaState?: GlobalCinemaState;
+};
+
+if (!globalForCinema.cinemaState) {
+  globalForCinema.cinemaState = {
+    roomSignals: {},
+    roomMessages: [],
+    roomReactions: [],
+  };
+}
+
+const { roomSignals, roomMessages, roomReactions } = globalForCinema.cinemaState;
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,8 +48,7 @@ export async function POST(req: NextRequest) {
       roomSignals[role] = {
         peerId,
         isSharing: !!isSharing,
-        // Set requestScreen only if explicitly requested, otherwise retain or clear
-        requestScreen: requestScreen ? true : (prevSignal?.requestScreen || false),
+        requestScreen: requestScreen ? true : prevSignal?.requestScreen || false,
         lastSeen: Date.now(),
       };
     }
@@ -41,7 +58,6 @@ export async function POST(req: NextRequest) {
       const exists = roomMessages.some((m) => m.id === newMessage.id);
       if (!exists) {
         roomMessages.push(newMessage);
-        // Keep last 60 messages in memory
         if (roomMessages.length > 60) {
           roomMessages.splice(0, roomMessages.length - 60);
         }
@@ -68,18 +84,27 @@ export async function POST(req: NextRequest) {
       partner.requestScreen = false;
     }
 
-    return NextResponse.json({
-      success: true,
-      partner: {
-        role: partnerRole,
-        peerId: isPartnerOnline && partner ? partner.peerId : null,
-        isOnline: isPartnerOnline,
-        isSharing: isPartnerOnline && partner ? partner.isSharing : false,
-        requestScreen: partnerRequestedScreen,
+    return NextResponse.json(
+      {
+        success: true,
+        partner: {
+          role: partnerRole,
+          peerId: isPartnerOnline && partner ? partner.peerId : null,
+          isOnline: isPartnerOnline,
+          isSharing: isPartnerOnline && partner ? partner.isSharing : false,
+          requestScreen: partnerRequestedScreen,
+        },
+        messages: roomMessages,
+        recentReactions: roomReactions.filter(
+          (r) => Date.now() - Number(r.id.split("-")[0] || 0) < 6000
+        ),
       },
-      messages: roomMessages,
-      recentReactions: roomReactions.filter((r) => Date.now() - Number(r.id.split("-")[0] || 0) < 6000),
-    });
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -98,14 +123,21 @@ export async function GET(req: NextRequest) {
   const partner = roomSignals[partnerRole];
   const isPartnerOnline = partner ? Date.now() - partner.lastSeen < 12000 : false;
 
-  return NextResponse.json({
-    partner: {
-      role: partnerRole,
-      peerId: isPartnerOnline && partner ? partner.peerId : null,
-      isOnline: isPartnerOnline,
-      isSharing: isPartnerOnline && partner ? partner.isSharing : false,
-      requestScreen: isPartnerOnline && partner ? !!partner.requestScreen : false,
+  return NextResponse.json(
+    {
+      partner: {
+        role: partnerRole,
+        peerId: isPartnerOnline && partner ? partner.peerId : null,
+        isOnline: isPartnerOnline,
+        isSharing: isPartnerOnline && partner ? partner.isSharing : false,
+        requestScreen: isPartnerOnline && partner ? !!partner.requestScreen : false,
+      },
+      messages: roomMessages,
     },
-    messages: roomMessages,
-  });
+    {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    }
+  );
 }

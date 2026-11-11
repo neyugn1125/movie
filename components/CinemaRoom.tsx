@@ -70,11 +70,12 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
   const [toastMessage, setToastMessage] = useState<ChatMessage | null>(null);
   const lastProcessedMsgIdRef = useRef<string | null>(null);
 
-  // Bind remote voice stream to dedicated audio tag
+  // Bind remote voice stream to dedicated muted audio tag (tricks Chromium into pumping WebRTC audio into AudioContext without double playback)
   useEffect(() => {
     if (remoteVoiceAudioRef.current) {
       if (remoteVoiceStream) {
         remoteVoiceAudioRef.current.srcObject = remoteVoiceStream;
+        remoteVoiceAudioRef.current.muted = true;
         remoteVoiceAudioRef.current.play().catch((err) => {
           console.warn("[Voice] Auto-play was prevented until user interaction:", err);
         });
@@ -143,8 +144,8 @@ export const CinemaRoom: React.FC<CinemaRoomProps> = ({ myRole, onLogout }) => {
 
   return (
     <div className="relative min-h-screen w-full flex flex-col bg-theme-bg text-white overflow-hidden select-none">
-      {/* Hidden dedicated HTML5 audio element for stable voice chat playback */}
-      <audio ref={remoteVoiceAudioRef} autoPlay playsInline className="hidden" />
+      {/* Hidden muted HTML5 audio element to keep WebRTC voice stream active for Web Audio API GainNode */}
+      <audio ref={remoteVoiceAudioRef} autoPlay playsInline muted className="hidden" />
 
       {/* Top-Right Incoming Message Popup Toast */}
       <MessageNotificationToast

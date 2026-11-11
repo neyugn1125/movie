@@ -40,7 +40,7 @@ export const configureVideoSender = async (
 
     const maxBitrateBps = bitrateMbps * 1_000_000;
     parameters.encodings[0].maxBitrate = maxBitrateBps;
-    parameters.degradationPreference = degradation;
+    (parameters as any).degradationPreference = degradation;
 
     await sender.setParameters(parameters);
   } catch (err) {

@@ -398,12 +398,13 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
   const startScreenShare = useCallback(
     async (targetBitrate: BitrateTier = bitrate, targetDegradation: DegradationPreference = degradation) => {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const displayMediaOptions: any = {
           video: {
             width: { ideal: 2560, max: 3840 },
             height: { ideal: 1440, max: 2160 },
             frameRate: { ideal: 60, max: 60 },
-            cursor: "motion" as unknown as boolean,
+            cursor: "motion",
           },
           audio: {
             echoCancellation: false,
@@ -412,7 +413,9 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
             sampleRate: 48000,
             channelCount: 2,
           },
-        });
+        };
+
+        const stream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
 
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack && "contentHint" in videoTrack) {
@@ -433,7 +436,7 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
           activePeerConnectionRef.current = call.peerConnection;
 
           // Apply bitrate and codec optimizations on peer connection
-          call.on("open", async () => {
+          const applyOptimizations = async () => {
             const pc = call.peerConnection;
             if (pc) {
               const transceivers = pc.getTransceivers();
@@ -445,7 +448,11 @@ export function useCinemaWebRTC({ myRole }: UseCinemaWebRTCProps) {
                 await configureVideoSender(videoTransceiver.sender, targetBitrate, targetDegradation);
               }
             }
-          });
+          };
+
+          applyOptimizations();
+          setTimeout(applyOptimizations, 300);
+          setTimeout(applyOptimizations, 1000);
 
           // Handle call close
           call.on("close", () => {
